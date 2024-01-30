@@ -267,7 +267,7 @@ export async function verifyMfaToken(login: Login, token: string): Promise<Login
     throw new OperationOutcomeError(badRequest('Login revoked'));
   }
 
-  if (login.granted) {
+  if (shouldErrorForAlreadyGranted(login)) {
     throw new OperationOutcomeError(badRequest('Login granted'));
   }
 
@@ -370,7 +370,7 @@ export async function setLoginMembership(login: Login, membershipId: string): Pr
     throw new OperationOutcomeError(badRequest('Login revoked'));
   }
 
-  if (login.granted) {
+  if (shouldErrorForAlreadyGranted(login)) {
     throw new OperationOutcomeError(badRequest('Login granted'));
   }
 
@@ -459,7 +459,7 @@ export async function setLoginScope(login: Login, scope: string): Promise<Login>
     throw new OperationOutcomeError(badRequest('Login revoked'));
   }
 
-  if (login.granted) {
+  if (shouldErrorForAlreadyGranted(login)) {
     throw new OperationOutcomeError(badRequest('Login granted'));
   }
 
@@ -799,3 +799,13 @@ export async function getLoginForAccessToken(accessToken: string): Promise<AuthS
   const project = await systemRepo.readReference<Project>(membership.project as Reference<Project>);
   return { login, membership, project, accessToken };
 }
+
+const LOGIN_CODE_VALID_AFTER_GRANTED_MS = 5_000;
+
+// shouldErrorForAlreadyGranted is used to check if the login has already been granted, while allowing
+// a grace period for the login code to be re-used. This can to be useful in cases where the client
+// calls the auth endpoint concurrently or in rapid succession. While this shouldn't be an enabler for buggy code,
+// it can prevent issues with otherwise notoriously footgun-prone useEffects in React.
+export const shouldErrorForAlreadyGranted = (login: Login): boolean => {
+  return !!login.granted && Date.now() > new Date(login.authTime).getTime() + LOGIN_CODE_VALID_AFTER_GRANTED_MS;
+};

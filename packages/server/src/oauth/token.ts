@@ -29,6 +29,7 @@ import {
   getClientApplicationMembership,
   getExternalUserInfo,
   revokeLogin,
+  shouldErrorForAlreadyGranted,
   timingSafeEqualStr,
   tryLogin,
   verifyMultipleMatchingException,
@@ -188,7 +189,7 @@ async function handleAuthorizationCode(req: Request, res: Response): Promise<voi
     return;
   }
 
-  if (login.granted) {
+  if (shouldErrorForAlreadyGranted(login)) {
     await revokeLogin(login);
     sendTokenError(res, 'invalid_grant', 'Token already granted');
     return;
