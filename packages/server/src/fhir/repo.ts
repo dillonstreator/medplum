@@ -25,6 +25,7 @@ import {
   normalizeOperationOutcome,
   notFound,
   parseSearchRequest,
+  preconditionFailed,
   protectedResourceTypes,
   resolveId,
   satisfiedAccessPolicy,
@@ -451,9 +452,9 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
     }
   }
 
-  async updateResource<T extends Resource>(resource: T): Promise<T> {
+  async updateResource<T extends Resource>(resource: T, versionId?: string): Promise<T> {
     try {
-      const result = await this.updateResourceImpl(resource, false);
+      const result = await this.updateResourceImpl(resource, false, versionId);
       this.logEvent(UpdateInteraction, AuditEventOutcome.Success, undefined, result);
       return result;
     } catch (err) {
@@ -462,7 +463,7 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
     }
   }
 
-  private async updateResourceImpl<T extends Resource>(resource: T, create: boolean): Promise<T> {
+  private async updateResourceImpl<T extends Resource>(resource: T, create: boolean, versionId?: string): Promise<T> {
     const { resourceType, id } = resource;
     if (!id) {
       throw new OperationOutcomeError(badRequest('Missing id'));
@@ -485,6 +486,9 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
       if (!this.canWriteToResource(existing)) {
         // Check before the update
         throw new OperationOutcomeError(forbidden);
+      }
+      if (versionId && existing.meta?.versionId !== versionId) {
+        throw new OperationOutcomeError(preconditionFailed);
       }
     }
 
@@ -573,11 +577,25 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
     }
   }
 
-  private async validateResource(resource: Resource): Promise<void> {
+  /**
+   * Validates a resource against the current project configuration.
+   * If strict mode is enabled (default), validates against base StructureDefinition and all profiles.
+   * If strict mode is disabled, validates against the legacy JSONSchema validator.
+   * Throws on validation errors.
+   * Returns silently on success.
+   * @param resource - The candidate resource to validate.
+   */
+  async validateResource(resource: Resource): Promise<void> {
     if (this.context.strictMode) {
+      const logger = getLogger();
       const start = process.hrtime.bigint();
+
+      const issues = validateResource(resource);
+      for (const issue of issues) {
+        logger.warn(`Validator warning: ${issue.details?.text}`, { project: this.context.projects?.[0], issue });
+      }
+
       const profileUrls = resource.meta?.profile;
-      validateResource(resource);
       if (profileUrls) {
         await this.validateProfiles(resource, profileUrls);
       }
@@ -585,8 +603,7 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
       const elapsedTime = Number(process.hrtime.bigint() - start);
       const MILLISECONDS = 1e6; // Conversion factor from ns to ms
       if (elapsedTime > 10 * MILLISECONDS) {
-        const ctx = getRequestContext();
-        ctx.logger.debug('High validator latency', {
+        logger.debug('High validator latency', {
           resourceType: resource.resourceType,
           id: resource.id,
           time: elapsedTime / MILLISECONDS,
@@ -598,22 +615,22 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
   }
 
   private async validateProfiles(resource: Resource, profileUrls: string[]): Promise<void> {
+    const logger = getLogger();
     for (const url of profileUrls) {
       const loadStart = process.hrtime.bigint();
       const profile = await this.loadProfile(url);
       const loadTime = Number(process.hrtime.bigint() - loadStart);
-      const ctx = getRequestContext();
       if (!profile) {
-        ctx.logger.warn('Unknown profile referenced', {
+        logger.warn('Unknown profile referenced', {
           resource: `${resource.resourceType}/${resource.id}`,
           url,
         });
         continue;
       }
       const validateStart = process.hrtime.bigint();
-      validateResource(resource, profile);
+      validateResource(resource, { profile });
       const validateTime = Number(process.hrtime.bigint() - validateStart);
-      ctx.logger.debug('Profile loaded', {
+      logger.debug('Profile loaded', {
         url,
         loadTime,
         validateTime,
@@ -1055,7 +1072,7 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
         } else if (policy.criteria) {
           // Add subquery for access policy criteria.
           const searchRequest = parseSearchRequest(policy.criteria);
-          const accessPolicyExpression = buildSearchExpression(builder, searchRequest);
+          const accessPolicyExpression = buildSearchExpression(builder, searchRequest.resourceType, searchRequest);
           if (accessPolicyExpression) {
             expressions.push(accessPolicyExpression);
           }

@@ -55,6 +55,7 @@ import {
 } from './fhircast';
 import { Hl7Message } from './hl7';
 import { isJwt, isMedplumAccessToken, parseJWTPayload, tryGetJwtExpiration } from './jwt';
+import { MedplumKeyValueClient } from './keyvalue';
 import {
   OperationOutcomeError,
   badRequest,
@@ -289,6 +290,29 @@ export interface MedplumClientOptions {
   verbose?: boolean;
 }
 
+export interface MedplumRequestOptions extends RequestInit {
+  /**
+   * Optional flag to follow "Location" or "Content-Location" URL on successful HTTP 200 "OK" responses.
+   */
+  followRedirectOnOk?: boolean;
+
+  /**
+   * Optional flag to follow "Location" or "Content-Location" URL on successful HTTP 201 "Created" responses.
+   */
+  followRedirectOnCreated?: boolean;
+
+  /**
+   * Optional flag to poll the status URL on successful HTTP 202 "Accepted" responses.
+   */
+  pollStatusOnAccepted?: boolean;
+
+  /**
+   * Optional polling time interval in milliseconds.
+   * Default value is 1000 (1 second).
+   */
+  pollStatusPeriod?: number;
+}
+
 export type FetchLike = (url: string, options?: any) => Promise<any>;
 
 /**
@@ -516,7 +540,7 @@ interface RequestCacheEntry {
 interface AutoBatchEntry<T = any> {
   readonly method: string;
   readonly url: string;
-  readonly options: RequestInit;
+  readonly options: MedplumRequestOptions;
   readonly resolve: (value: T) => void;
   readonly reject: (reason: any) => void;
 }
@@ -689,6 +713,7 @@ export class MedplumClient extends EventTarget {
   private basicAuth?: string;
   private initPromise: Promise<void>;
   private initComplete = true;
+  private keyValueClient?: MedplumKeyValueClient;
 
   constructor(options?: MedplumClientOptions) {
     super();
@@ -890,7 +915,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns Promise to the response content.
    */
-  get<T = any>(url: URL | string, options: RequestInit = {}): ReadablePromise<T> {
+  get<T = any>(url: URL | string, options: MedplumRequestOptions = {}): ReadablePromise<T> {
     url = url.toString();
     const cached = this.getCacheEntry(url, options);
     if (cached) {
@@ -935,7 +960,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns Promise to the response content.
    */
-  post(url: URL | string, body: any, contentType?: string, options: RequestInit = {}): Promise<any> {
+  post(url: URL | string, body: any, contentType?: string, options: MedplumRequestOptions = {}): Promise<any> {
     url = url.toString();
     this.setRequestBody(options, body);
     if (contentType) {
@@ -959,7 +984,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns Promise to the response content.
    */
-  put(url: URL | string, body: any, contentType?: string, options: RequestInit = {}): Promise<any> {
+  put(url: URL | string, body: any, contentType?: string, options: MedplumRequestOptions = {}): Promise<any> {
     url = url.toString();
     this.setRequestBody(options, body);
     if (contentType) {
@@ -982,7 +1007,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns Promise to the response content.
    */
-  patch(url: URL | string, operations: PatchOperation[], options: RequestInit = {}): Promise<any> {
+  patch(url: URL | string, operations: PatchOperation[], options: MedplumRequestOptions = {}): Promise<any> {
     url = url.toString();
     this.setRequestBody(options, operations);
     this.setRequestContentType(options, ContentType.JSON_PATCH);
@@ -1003,7 +1028,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns Promise to the response content.
    */
-  delete(url: URL | string, options: RequestInit = {}): Promise<any> {
+  delete(url: URL | string, options: MedplumRequestOptions = {}): Promise<any> {
     url = url.toString();
     this.invalidateUrl(url);
     options.method = 'DELETE';
@@ -1021,7 +1046,10 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns Promise to the authentication response.
    */
-  async startNewUser(newUserRequest: NewUserRequest, options?: RequestInit): Promise<LoginAuthenticationResponse> {
+  async startNewUser(
+    newUserRequest: NewUserRequest,
+    options?: MedplumRequestOptions
+  ): Promise<LoginAuthenticationResponse> {
     const { codeChallengeMethod, codeChallenge } = await this.startPkce();
     return this.post(
       'auth/newuser',
@@ -1046,7 +1074,7 @@ export class MedplumClient extends EventTarget {
    */
   async startNewProject(
     newProjectRequest: NewProjectRequest,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): Promise<LoginAuthenticationResponse> {
     return this.post('auth/newproject', newProjectRequest, undefined, options) as Promise<LoginAuthenticationResponse>;
   }
@@ -1061,7 +1089,7 @@ export class MedplumClient extends EventTarget {
    */
   async startNewPatient(
     newPatientRequest: NewPatientRequest,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): Promise<LoginAuthenticationResponse> {
     return this.post('auth/newpatient', newPatientRequest, undefined, options) as Promise<LoginAuthenticationResponse>;
   }
@@ -1075,7 +1103,7 @@ export class MedplumClient extends EventTarget {
    */
   async startLogin(
     loginRequest: EmailPasswordLoginRequest,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): Promise<LoginAuthenticationResponse> {
     return this.post(
       'auth/login',
@@ -1100,7 +1128,7 @@ export class MedplumClient extends EventTarget {
    */
   async startGoogleLogin(
     loginRequest: GoogleLoginRequest,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): Promise<LoginAuthenticationResponse> {
     return this.post(
       'auth/google',
@@ -1331,7 +1359,7 @@ export class MedplumClient extends EventTarget {
   search<K extends ResourceType>(
     resourceType: K,
     query?: QueryTypes,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): ReadablePromise<Bundle<ExtractResource<K>>> {
     const url = this.fhirSearchUrl(resourceType, query);
     const cacheKey = 'search-' + url.toString();
@@ -1379,7 +1407,7 @@ export class MedplumClient extends EventTarget {
   searchOne<K extends ResourceType>(
     resourceType: K,
     query?: QueryTypes,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): ReadablePromise<ExtractResource<K> | undefined> {
     const url = this.fhirSearchUrl(resourceType, query);
     url.searchParams.set('_count', '1');
@@ -1421,7 +1449,7 @@ export class MedplumClient extends EventTarget {
   searchResources<K extends ResourceType>(
     resourceType: K,
     query?: QueryTypes,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): ReadablePromise<ResourceArray<ExtractResource<K>>> {
     const url = this.fhirSearchUrl(resourceType, query);
     const cacheKey = 'searchResources-' + url.toString();
@@ -1459,7 +1487,7 @@ export class MedplumClient extends EventTarget {
   async *searchResourcePages<K extends ResourceType>(
     resourceType: K,
     query?: QueryTypes,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): AsyncGenerator<ResourceArray<ExtractResource<K>>> {
     let url: URL | undefined = this.fhirSearchUrl(resourceType, query);
 
@@ -1486,7 +1514,7 @@ export class MedplumClient extends EventTarget {
    * @returns Promise to expanded ValueSet.
    * @deprecated Use `valueSetExpand()` instead.
    */
-  searchValueSet(system: string, filter: string, options?: RequestInit): ReadablePromise<ValueSet> {
+  searchValueSet(system: string, filter: string, options?: MedplumRequestOptions): ReadablePromise<ValueSet> {
     return this.valueSetExpand({ url: system, filter }, options);
   }
 
@@ -1498,7 +1526,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns Promise to expanded ValueSet.
    */
-  valueSetExpand(params: ValueSetExpandParams, options?: RequestInit): ReadablePromise<ValueSet> {
+  valueSetExpand(params: ValueSetExpandParams, options?: MedplumRequestOptions): ReadablePromise<ValueSet> {
     const url = this.fhirUrl('ValueSet', '$expand');
     url.search = new URLSearchParams(params as Record<string, string>).toString();
     return this.get(url.toString(), options);
@@ -1558,7 +1586,7 @@ export class MedplumClient extends EventTarget {
   readResource<K extends ResourceType>(
     resourceType: K,
     id: string,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): ReadablePromise<ExtractResource<K>> {
     return this.get<ExtractResource<K>>(this.fhirUrl(resourceType, id), options);
   }
@@ -1583,7 +1611,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns The resource if available.
    */
-  readReference<T extends Resource>(reference: Reference<T>, options?: RequestInit): ReadablePromise<T> {
+  readReference<T extends Resource>(reference: Reference<T>, options?: MedplumRequestOptions): ReadablePromise<T> {
     const refString = reference.reference;
     if (!refString) {
       return new ReadablePromise(Promise.reject(new Error('Missing reference')));
@@ -1696,7 +1724,7 @@ export class MedplumClient extends EventTarget {
         if (options?.expandProfile) {
           const url = this.fhirUrl('StructureDefinition', '$expand-profile');
           url.search = new URLSearchParams({ url: profileUrl }).toString();
-          const sdBundle = await this.get<Bundle<StructureDefinition>>(url.toString());
+          const sdBundle = (await this.post(url.toString(), {})) as Bundle<StructureDefinition>;
           return bundleToResourceArray(sdBundle).map((sd) => {
             loadDataType(sd, sd.url);
             return sd.url;
@@ -1746,7 +1774,7 @@ export class MedplumClient extends EventTarget {
   readHistory<K extends ResourceType>(
     resourceType: K,
     id: string,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): ReadablePromise<Bundle<ExtractResource<K>>> {
     return this.get(this.fhirUrl(resourceType, id, '_history'), options);
   }
@@ -1774,7 +1802,7 @@ export class MedplumClient extends EventTarget {
     resourceType: K,
     id: string,
     vid: string,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): ReadablePromise<ExtractResource<K>> {
     return this.get(this.fhirUrl(resourceType, id, '_history', vid), options);
   }
@@ -1796,7 +1824,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns A Bundle of all Resources related to the Patient
    */
-  readPatientEverything(id: string, options?: RequestInit): ReadablePromise<Bundle> {
+  readPatientEverything(id: string, options?: MedplumRequestOptions): ReadablePromise<Bundle> {
     return this.get(this.fhirUrl('Patient', id, '$everything'), options);
   }
 
@@ -1825,7 +1853,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns The result of the create operation.
    */
-  createResource<T extends Resource>(resource: T, options?: RequestInit): Promise<T> {
+  createResource<T extends Resource>(resource: T, options?: MedplumRequestOptions): Promise<T> {
     if (!resource.resourceType) {
       throw new Error('Missing resourceType');
     }
@@ -1874,7 +1902,11 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns The result of the create operation.
    */
-  async createResourceIfNoneExist<T extends Resource>(resource: T, query: string, options?: RequestInit): Promise<T> {
+  async createResourceIfNoneExist<T extends Resource>(
+    resource: T,
+    query: string,
+    options?: MedplumRequestOptions
+  ): Promise<T> {
     return ((await this.searchOne(resource.resourceType, query, options)) ??
       this.createResource(resource, options)) as Promise<T>;
   }
@@ -1910,7 +1942,7 @@ export class MedplumClient extends EventTarget {
     filename: string | undefined,
     contentType: string,
     onProgress?: (e: ProgressEvent) => void,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): Promise<Attachment> {
     const binary = await this.createBinary(data, filename, contentType, onProgress, options);
     return {
@@ -1951,7 +1983,7 @@ export class MedplumClient extends EventTarget {
     filename: string | undefined,
     contentType: string,
     onProgress?: (e: ProgressEvent) => void,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): Promise<Binary> {
     const url = this.fhirUrl('Binary');
     if (filename) {
@@ -1969,7 +2001,7 @@ export class MedplumClient extends EventTarget {
     data: BinarySource,
     contentType: string,
     onProgress: (e: ProgressEvent) => void,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): Promise<any> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -2063,7 +2095,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns The result of the create operation.
    */
-  createComment(resource: Resource, text: string, options?: RequestInit): Promise<Communication> {
+  createComment(resource: Resource, text: string, options?: MedplumRequestOptions): Promise<Communication> {
     const profile = this.getProfile();
     let encounter: Reference<Encounter> | undefined = undefined;
     let subject: Reference<Patient> | undefined = undefined;
@@ -2123,7 +2155,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns The result of the update operation.
    */
-  async updateResource<T extends Resource>(resource: T, options?: RequestInit): Promise<T> {
+  async updateResource<T extends Resource>(resource: T, options?: MedplumRequestOptions): Promise<T> {
     if (!resource.resourceType) {
       throw new Error('Missing resourceType');
     }
@@ -2171,7 +2203,7 @@ export class MedplumClient extends EventTarget {
     resourceType: K,
     id: string,
     operations: PatchOperation[],
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): Promise<ExtractResource<K>> {
     this.invalidateSearches(resourceType);
     return this.patch(this.fhirUrl(resourceType, id), operations, options);
@@ -2194,7 +2226,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns The result of the delete operation.
    */
-  deleteResource(resourceType: ResourceType, id: string, options?: RequestInit): Promise<any> {
+  deleteResource(resourceType: ResourceType, id: string, options?: MedplumRequestOptions): Promise<any> {
     this.deleteCacheEntry(this.fhirUrl(resourceType, id).toString());
     this.invalidateSearches(resourceType);
     return this.delete(this.fhirUrl(resourceType, id), options);
@@ -2218,7 +2250,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns The validate operation outcome.
    */
-  validateResource<T extends Resource>(resource: T, options?: RequestInit): Promise<OperationOutcome> {
+  validateResource<T extends Resource>(resource: T, options?: MedplumRequestOptions): Promise<OperationOutcome> {
     return this.post(this.fhirUrl(resource.resourceType, '$validate'), resource, undefined, options);
   }
 
@@ -2234,7 +2266,7 @@ export class MedplumClient extends EventTarget {
     idOrIdentifier: string | Identifier,
     body: any,
     contentType?: string,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): Promise<any> {
     let url: URL;
     if (typeof idOrIdentifier === 'string') {
@@ -2297,7 +2329,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns The FHIR batch/transaction response bundle.
    */
-  executeBatch(bundle: Bundle, options?: RequestInit): Promise<Bundle> {
+  executeBatch(bundle: Bundle, options?: MedplumRequestOptions): Promise<Bundle> {
     return this.post(this.fhirBaseUrl.slice(0, -1), bundle, undefined, options);
   }
 
@@ -2341,7 +2373,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns Promise to the operation outcome.
    */
-  sendEmail(email: MailOptions, options?: RequestInit): Promise<OperationOutcome> {
+  sendEmail(email: MailOptions, options?: MedplumRequestOptions): Promise<OperationOutcome> {
     return this.post('email/v1/send', email, ContentType.JSON, options);
   }
 
@@ -2394,7 +2426,12 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns The GraphQL result.
    */
-  graphql(query: string, operationName?: string | null, variables?: any, options?: RequestInit): Promise<any> {
+  graphql(
+    query: string,
+    operationName?: string | null,
+    variables?: any,
+    options?: MedplumRequestOptions
+  ): Promise<any> {
     return this.post(this.fhirUrl('$graphql'), { query, operationName, variables }, ContentType.JSON, options);
   }
 
@@ -2412,7 +2449,7 @@ export class MedplumClient extends EventTarget {
     resourceType: K,
     id: string,
     graphName: string,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): ReadablePromise<Bundle> {
     return this.get<Bundle>(`${this.fhirUrl(resourceType, id)}/$graph?graph=${graphName}`, options);
   }
@@ -2434,7 +2471,7 @@ export class MedplumClient extends EventTarget {
     body: any,
     contentType?: string,
     waitForResponse?: boolean,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): Promise<any> {
     return this.post(
       this.fhirUrl('Agent', resolveId(agent) as string, '$push'),
@@ -2538,7 +2575,7 @@ export class MedplumClient extends EventTarget {
    * @category Authentication
    */
   isLoading(): boolean {
-    return !!this.profilePromise;
+    return !this.isInitialized || !!this.profilePromise;
   }
 
   /**
@@ -2628,7 +2665,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch request init options.
    * @returns Promise to the response body as a blob.
    */
-  async download(url: URL | string, options: RequestInit = {}): Promise<Blob> {
+  async download(url: URL | string, options: MedplumRequestOptions = {}): Promise<Blob> {
     if (this.refreshPromise) {
       await this.refreshPromise;
     }
@@ -2655,7 +2692,7 @@ export class MedplumClient extends EventTarget {
     contentType: string,
     filename: string | undefined,
     additionalFields?: Partial<Media>,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): Promise<Media> {
     const binary = await this.createBinary(contents, filename, contentType);
     return this.createResource(
@@ -2686,7 +2723,7 @@ export class MedplumClient extends EventTarget {
     exportLevel = '',
     resourceTypes?: string,
     since?: string,
-    options?: RequestInit
+    options?: MedplumRequestOptions
   ): Promise<Partial<BulkDataExport>> {
     const fhirPath = exportLevel ? `${exportLevel}/` : exportLevel;
     const url = this.fhirUrl(`${fhirPath}$export`);
@@ -2708,7 +2745,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options.
    * @returns The response body.
    */
-  async startAsyncRequest<T>(url: string, options: RequestInit = {}): Promise<T> {
+  async startAsyncRequest<T>(url: string, options: MedplumRequestOptions = {}): Promise<T> {
     this.addFetchOptionsDefaults(options);
 
     const headers = options.headers as Record<string, string>;
@@ -2732,6 +2769,17 @@ export class MedplumClient extends EventTarget {
     return this.fetchWithRetry(url, options);
   }
 
+  /**
+   * Returns the key value client.
+   * @returns The key value client.
+   */
+  get keyValue(): MedplumKeyValueClient {
+    if (!this.keyValueClient) {
+      this.keyValueClient = new MedplumKeyValueClient(this);
+    }
+    return this.keyValueClient;
+  }
+
   //
   // Private helpers
   //
@@ -2742,7 +2790,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch options for cache settings.
    * @returns The cached entry if found.
    */
-  private getCacheEntry(key: string, options: RequestInit | undefined): RequestCacheEntry | undefined {
+  private getCacheEntry(key: string, options: MedplumRequestOptions | undefined): RequestCacheEntry | undefined {
     if (!this.requestCache || options?.cache === 'no-cache' || options?.cache === 'reload') {
       return undefined;
     }
@@ -2796,7 +2844,11 @@ export class MedplumClient extends EventTarget {
    * @param state - Optional request state.
    * @returns The JSON content body if available.
    */
-  private async request<T>(url: string, options: RequestInit = {}, state: RequestState = {}): Promise<T> {
+  private async request<T>(
+    url: string,
+    options: MedplumRequestOptions = {},
+    state: RequestState = {}
+  ): Promise<T> {
     const response = await this.wrappedFetch(url, options);
 
     if (response.status === 401) {
@@ -2821,8 +2873,10 @@ export class MedplumClient extends EventTarget {
 
     const obj = await this.parseBody(response, isJson);
 
-    const redirectMode = options.redirect ?? this.options.redirect;
-    if ((response.status === 200 || response.status === 201) && redirectMode === 'follow') {
+    if (
+      (response.status === 200 && options.followRedirectOnOk) ||
+      (response.status === 201 && options.followRedirectOnCreated)
+    ) {
       const contentLocation = await tryGetContentLocation(response, obj);
       if (contentLocation) {
         // Follow redirect
@@ -2830,8 +2884,7 @@ export class MedplumClient extends EventTarget {
       }
     }
 
-    const preferMode = (options.headers as Record<string, string> | undefined)?.['Prefer'];
-    if (response.status === 202 && preferMode === 'respond-async') {
+    if (response.status === 202 && options.pollStatusOnAccepted) {
       const contentLocation = await tryGetContentLocation(response, obj);
       const statusUrl = contentLocation ?? state.statusUrl;
       if (statusUrl) {
@@ -2861,7 +2914,7 @@ export class MedplumClient extends EventTarget {
     return obj;
   }
 
-  private async fetchWithRetry(url: string, options: RequestInit): Promise<Response> {
+  private async fetchWithRetry(url: string, options: MedplumRequestOptions): Promise<Response> {
     if (!url.startsWith('http')) {
       url = new URL(url, this.baseUrl).href;
     }
@@ -2889,7 +2942,7 @@ export class MedplumClient extends EventTarget {
     return response as Response;
   }
 
-  private logRequest(url: string, options: RequestInit): void {
+  private logRequest(url: string, options: MedplumRequestOptions): void {
     console.log(`> ${options.method} ${url}`);
     if (options.headers) {
       const headers = options.headers as Record<string, string>;
@@ -2907,19 +2960,23 @@ export class MedplumClient extends EventTarget {
     }
   }
 
-  private async pollStatus<T>(statusUrl: string, options: RequestInit, state: RequestState): Promise<T> {
+  private async pollStatus<T>(statusUrl: string, options: MedplumRequestOptions, state: RequestState): Promise<T> {
+    const statusOptions: MedplumRequestOptions = { ...options, method: 'GET', body: undefined, redirect: 'follow' };
     if (state.pollCount === undefined) {
       // First request - try request immediately
-      options.redirect = 'follow';
+      if (options.headers && typeof options.headers === 'object' && 'Prefer' in options.headers) {
+        statusOptions.headers = { ...options.headers };
+        delete statusOptions.headers.Prefer;
+      }
       state.statusUrl = statusUrl;
       state.pollCount = 1;
     } else {
       // Subsequent requests - wait and retry
-      const retryDelay = 1000;
+      const retryDelay = options.pollStatusPeriod ?? 1000;
       await sleep(retryDelay);
       state.pollCount++;
     }
-    return this.request(statusUrl, { ...options, method: 'GET' }, state);
+    return this.request(statusUrl, { ...statusOptions, method: 'GET' }, state);
   }
 
   /**
@@ -2982,7 +3039,7 @@ export class MedplumClient extends EventTarget {
    * Adds default options to the fetch options.
    * @param options - The options to add defaults to.
    */
-  private addFetchOptionsDefaults(options: RequestInit): void {
+  private addFetchOptionsDefaults(options: MedplumRequestOptions): void {
     let headers = options.headers as Record<string, string> | undefined;
     if (!headers) {
       headers = {};
@@ -3018,7 +3075,7 @@ export class MedplumClient extends EventTarget {
    * @param options - The fetch options.
    * @param contentType - The new content type to set.
    */
-  private setRequestContentType(options: RequestInit, contentType: string): void {
+  private setRequestContentType(options: MedplumRequestOptions, contentType: string): void {
     if (!options.headers) {
       options.headers = {};
     }
@@ -3031,7 +3088,7 @@ export class MedplumClient extends EventTarget {
    * @param options - The fetch options.
    * @param data - The new content body.
    */
-  private setRequestBody(options: RequestInit, data: any): void {
+  private setRequestBody(options: MedplumRequestOptions, data: any): void {
     if (
       typeof data === 'string' ||
       (typeof Blob !== 'undefined' && (data instanceof Blob || data.constructor.name === 'Blob')) ||
@@ -3052,7 +3109,7 @@ export class MedplumClient extends EventTarget {
    * @param options - Optional fetch request init options.
    * @returns The result of the retry.
    */
-  private handleUnauthenticated(url: string, options: RequestInit): Promise<any> {
+  private handleUnauthenticated(url: string, options: MedplumRequestOptions): Promise<any> {
     if (this.refresh()) {
       return this.request(url, options);
     }
@@ -3418,7 +3475,7 @@ export class MedplumClient extends EventTarget {
    * @returns The user profile resource.
    */
   private async fetchTokens(formBody: URLSearchParams): Promise<ProfileResource> {
-    const options: RequestInit = {
+    const options: MedplumRequestOptions = {
       method: 'POST',
       headers: { 'Content-Type': ContentType.FORM_URL_ENCODED },
       body: formBody.toString(),
@@ -3649,7 +3706,7 @@ function ensureTrailingSlash(url: string): string {
  * @param url - The URL to concat. Can be relative or absolute.
  * @returns The concatenated URL.
  */
-function concatUrls(baseUrl: string, url: string): string {
+export function concatUrls(baseUrl: string, url: string): string {
   return new URL(url, baseUrl).toString();
 }
 

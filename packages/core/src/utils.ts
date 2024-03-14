@@ -1,6 +1,7 @@
 import {
   Attachment,
   CodeableConcept,
+  Coding,
   Device,
   Extension,
   Identifier,
@@ -17,7 +18,8 @@ import {
   Resource,
   ResourceType,
 } from '@medplum/fhirtypes';
-import { formatHumanName } from './format';
+import { getTypedPropertyValue } from './fhirpath/utils';
+import { formatCodeableConcept, formatHumanName } from './format';
 import { OperationOutcomeError, validationError } from './outcomes';
 import { isReference } from './types';
 
@@ -119,9 +121,10 @@ export function getDisplayString(resource: Resource): string {
       return deviceName;
     }
   }
-  if (resource.resourceType === 'Observation') {
-    if ('code' in resource && resource.code?.text) {
-      return resource.code.text;
+  if (resource.resourceType === 'MedicationRequest') {
+    const code = resource.medicationCodeableConcept;
+    if (code) {
+      return formatCodeableConcept(code);
     }
   }
   if (resource.resourceType === 'User') {
@@ -131,6 +134,18 @@ export function getDisplayString(resource: Resource): string {
   }
   if ('name' in resource && resource.name && typeof resource.name === 'string') {
     return resource.name;
+  }
+  if ('code' in resource && resource.code) {
+    let code = resource.code;
+    if (Array.isArray(code)) {
+      code = code[0];
+    }
+    if (isCodeableConcept(code)) {
+      return formatCodeableConcept(code);
+    }
+    if (isTextObject(code)) {
+      return code.text;
+    }
   }
   return getReferenceString(resource);
 }
@@ -387,15 +402,17 @@ export function setIdentifier(resource: Resource & { identifier?: Identifier[] }
  * @returns The extension value if found; undefined otherwise.
  */
 export function getExtensionValue(resource: any, ...urls: string[]): string | undefined {
-  // Let curr be the current resource or extension. Extensions can be nested.
-  let curr: any = resource;
-
-  // For each of the urls, try to find a matching nested extension.
-  for (let i = 0; i < urls.length && curr; i++) {
-    curr = (curr?.extension as Extension[] | undefined)?.find((e) => e.url === urls[i]);
+  const extension = getExtension(resource, ...urls);
+  if (!extension) {
+    return undefined;
   }
 
-  return curr?.valueString as string | undefined;
+  const typedValue = getTypedPropertyValue({ type: 'Extension', value: extension }, 'value[x]');
+  if (!typedValue) {
+    return undefined;
+  }
+
+  return Array.isArray(typedValue) ? typedValue[0].value : typedValue.value;
 }
 
 /**
@@ -633,7 +650,46 @@ export function isObject(obj: unknown): obj is Record<string, unknown> {
  * @returns True if the input array is an array of strings.
  */
 export function isStringArray(arr: any[]): arr is string[] {
-  return arr.every((e) => typeof e === 'string');
+  return arr.every(isString);
+}
+
+/**
+ * Returns true if the input value is a string.
+ * @param value - The candidate value.
+ * @returns True if the input value is a string.
+ */
+export function isString(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+/**
+ * Returns true if the input value is a Coding object.
+ * This is a heuristic check based on the presence of the "code" property.
+ * @param value - The candidate value.
+ * @returns True if the input value is a Coding.
+ */
+export function isCoding(value: unknown): value is Coding & { code: string } {
+  return isObject(value) && 'code' in value && typeof value.code === 'string';
+}
+
+/**
+ * Returns true if the input value is a CodeableConcept object.
+ * This is a heuristic check based on the presence of the "coding" property.
+ * @param value - The candidate value.
+ * @returns True if the input value is a CodeableConcept.
+ */
+export function isCodeableConcept(value: unknown): value is CodeableConcept & { coding: Coding[] } {
+  return isObject(value) && 'coding' in value && Array.isArray(value.coding) && value.coding.every(isCoding);
+}
+
+/**
+ * Returns true if the input value is an object with a string text property.
+ * This is a heuristic check based on the presence of the "text" property.
+ * @param value - The candidate value.
+ * @returns True if the input value is a text object.
+ */
+export function isTextObject(value: unknown): value is { text: string } {
+  return isObject(value) && 'text' in value && typeof value.text === 'string';
 }
 
 // Precompute hex octets

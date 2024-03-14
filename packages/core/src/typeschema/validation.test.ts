@@ -5,9 +5,11 @@ import {
   AppointmentParticipant,
   Binary,
   Bundle,
+  CarePlan,
   CodeSystem,
   Condition,
   DiagnosticReport,
+  DocumentReference,
   ElementDefinition,
   Encounter,
   Extension,
@@ -230,7 +232,7 @@ describe('FHIR resource validation', () => {
       ],
     };
 
-    expect(() => validateResource(observation, observationProfile)).not.toThrow();
+    expect(() => validateResource(observation, { profile: observationProfile })).not.toThrow();
   });
 
   test('Valid resource under constraining profile with additional non-constrained fields', () => {
@@ -300,7 +302,7 @@ describe('FHIR resource validation', () => {
       ],
     };
 
-    expect(() => validateResource(observation, observationProfile)).not.toThrow();
+    expect(() => validateResource(observation, { profile: observationProfile })).not.toThrow();
   });
 
   test('Invalid cardinality', () => {
@@ -344,7 +346,7 @@ describe('FHIR resource validation', () => {
       ],
     };
 
-    expect(() => validateResource(observation, observationProfile)).toThrow(
+    expect(() => validateResource(observation, { profile: observationProfile })).toThrow(
       'Invalid number of values: expected 2..*, but found 1 (Observation.component)'
     );
   });
@@ -399,7 +401,7 @@ describe('FHIR resource validation', () => {
       ],
     };
 
-    expect(() => validateResource(observation, observationProfile)).toThrow();
+    expect(() => validateResource(observation, { profile: observationProfile })).toThrow();
   });
 
   test('Invalid slice contents', () => {
@@ -453,7 +455,7 @@ describe('FHIR resource validation', () => {
     };
 
     expect(() => {
-      validateResource(observation, observationProfile);
+      validateResource(observation, { profile: observationProfile });
     }).toThrow(
       `Incorrect number of values provided for slice 'diastolic': expected 1..1, but found 0 (Observation.component)`
     );
@@ -488,7 +490,7 @@ describe('FHIR resource validation', () => {
         },
       ],
     };
-    expect(() => validateResource(patient, patientProfile)).toThrow(
+    expect(() => validateResource(patient, { profile: patientProfile })).toThrow(
       new Error('Missing required property (Patient.telecom.system)')
     );
   });
@@ -745,7 +747,7 @@ describe('FHIR resource validation', () => {
         value: 130,
       },
     };
-    expect(() => validateResource(observation, bodyWeightProfile as StructureDefinition)).not.toThrow();
+    expect(() => validateResource(observation, { profile: bodyWeightProfile as StructureDefinition })).not.toThrow();
   });
 
   test('validateResource', () => {
@@ -1325,7 +1327,7 @@ describe('FHIR resource validation', () => {
       status: 'finished',
       class: { code: 'foo' },
     };
-    expect(() => validateResource(e1, profile)).toThrow();
+    expect(() => validateResource(e1, { profile })).toThrow();
 
     const e2: Encounter = {
       resourceType: 'Encounter',
@@ -1333,7 +1335,7 @@ describe('FHIR resource validation', () => {
       class: { code: 'foo' },
       identifier: [{ system: 'http://example.com', value: '123' }],
     };
-    expect(() => validateResource(e2, profile)).not.toThrow();
+    expect(() => validateResource(e2, { profile })).not.toThrow();
 
     const e3: Encounter = {
       resourceType: 'Encounter',
@@ -1341,7 +1343,63 @@ describe('FHIR resource validation', () => {
       class: { code: 'foo' },
       identifier: [{ system: 'http://example.com', value: '456' }],
     };
-    expect(() => validateResource(e3, profile)).toThrow();
+    expect(() => validateResource(e3, { profile })).toThrow();
+  });
+
+  test('Multiple values for choice of type property', () => {
+    const carePlan: CarePlan = {
+      resourceType: 'CarePlan',
+      subject: {
+        reference: 'Patient/fdf33a83-08b0-4475-ae99-f5b6fec2f0f1',
+        display: 'Homer Simpson',
+      },
+      status: 'active',
+      intent: 'order',
+      activity: [
+        {
+          detail: {
+            status: 'in-progress',
+            scheduledPeriod: {
+              start: '2024-02-29T16:52:20.825Z',
+            },
+            scheduledTiming: {
+              repeat: {
+                period: 1,
+                periodUnit: 'd',
+              },
+            },
+          },
+        },
+      ],
+    };
+
+    // TODO: Change this check from warning to error
+    // Duplicate entries for choice-of-type property is currently a warning
+    // We need to first log and track this, and notify customers of breaking changes
+    const issues = validateResource(carePlan);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].details?.text).toContain('Duplicate choice of type property');
+  });
+
+  test('Reference type check', () => {
+    const docRef: DocumentReference = {
+      resourceType: 'DocumentReference',
+      status: 'current',
+      content: [{ attachment: { data: 'aGVsbG8gd29ybGQ=' } }],
+
+      // Note that "relatesTo.target" must be a Reference to a DocumentReference
+      // This reference to a Patient is invalid
+      relatesTo: [{ code: 'appends', target: { reference: 'Patient/123' } }],
+    };
+
+    // TODO: Change this check from warning to error
+    // Duplicate entries for choice-of-type property is currently a warning
+    // We need to first log and track this, and notify customers of breaking changes
+    const issues = validateResource(docRef);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].details?.text).toContain('Invalid reference for');
   });
 });
 

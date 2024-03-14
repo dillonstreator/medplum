@@ -19,7 +19,4 @@ npm --version
 [ ! -d "node_modules" ] && npm ci --maxsockets 1
 
 # Build
-npm run build:all
-
-# Lint
-npm run lint
+npm run build

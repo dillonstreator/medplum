@@ -10,6 +10,7 @@ import {
 } from '@medplum/fhirtypes';
 import { ContentType } from './contenttype';
 import { OperationOutcomeError } from './outcomes';
+import { PropertyType } from './types';
 import {
   ResourceWithCode,
   arrayBufferToBase64,
@@ -55,7 +56,6 @@ import {
   splitN,
   stringify,
 } from './utils';
-import { PropertyType } from './types';
 
 if (typeof btoa === 'undefined') {
   global.btoa = function (str) {
@@ -156,6 +156,31 @@ describe('Core Utils', () => {
     expect(getDisplayString({ resourceType: 'Device', id: '123', deviceName: [] })).toEqual('Device/123');
     expect(getDisplayString({ resourceType: 'User', email: 'foo@example.com' } as User)).toEqual('foo@example.com');
     expect(getDisplayString({ resourceType: 'User', id: '123' } as User)).toEqual('User/123');
+    expect(getDisplayString({ resourceType: 'Bot', id: '123', code: 'console.log()' })).toEqual('Bot/123');
+    expect(
+      getDisplayString({
+        resourceType: 'AllergyIntolerance',
+        patient: { reference: 'Patient/123' },
+        code: { text: 'Peanut' },
+      })
+    ).toEqual('Peanut');
+    expect(
+      getDisplayString({
+        resourceType: 'AllergyIntolerance',
+        patient: { reference: 'Patient/123' },
+        code: { coding: [{ code: 'Peanut' }] },
+      })
+    ).toEqual('Peanut');
+    expect(
+      getDisplayString({
+        resourceType: 'MedicationRequest',
+        status: 'active',
+        intent: 'order',
+        subject: { reference: 'Patient/123' },
+        medicationCodeableConcept: { text: 'foo' },
+      })
+    ).toEqual('foo');
+    expect(getDisplayString({ resourceType: 'PractitionerRole', code: [{ text: 'foo' }] })).toEqual('foo');
   });
 
   const EMPTY = [true, false];
@@ -449,7 +474,16 @@ describe('Core Utils', () => {
     });
   });
 
-  test('Get extension value', () => {
+  test('Get extension undefined value', () => {
+    const resource: Patient = {
+      resourceType: 'Patient',
+      extension: [{ url: 'http://example.com' }],
+    };
+    expect(getExtensionValue(resource, 'http://example.com')).toBeUndefined();
+    expect(getExtensionValue(resource, 'http://example.com', 'key1')).toBeUndefined();
+  });
+
+  test('Get extension string value', () => {
     const resource: Patient = {
       resourceType: 'Patient',
       extension: [
@@ -467,6 +501,26 @@ describe('Core Utils', () => {
     };
     expect(getExtensionValue(resource, 'http://example.com')).toBe('xyz');
     expect(getExtensionValue(resource, 'http://example.com', 'key1')).toBe('value1');
+  });
+
+  test('Get extension dateTime value', () => {
+    const resource: Patient = {
+      resourceType: 'Patient',
+      extension: [
+        {
+          url: 'http://example.com',
+          valueString: 'xyz',
+          extension: [
+            {
+              url: 'key1',
+              valueDateTime: '2023-03-01T13:12:00-05:00',
+            },
+          ],
+        },
+      ],
+    };
+    expect(getExtensionValue(resource, 'http://example.com')).toBe('xyz');
+    expect(getExtensionValue(resource, 'http://example.com', 'key1')).toBe('2023-03-01T13:12:00-05:00');
   });
 
   test('Get extension object', () => {

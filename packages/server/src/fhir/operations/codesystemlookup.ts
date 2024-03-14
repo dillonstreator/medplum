@@ -1,20 +1,21 @@
 import { TypedValue, allOk, badRequest, notFound } from '@medplum/core';
-import { Coding } from '@medplum/fhirtypes';
+import { CodeSystem, Coding } from '@medplum/fhirtypes';
 import { Request, Response } from 'express';
 import { getDatabasePool } from '../../database';
 import { sendOutcome } from '../outcomes';
 import { Column, Condition, SelectQuery } from '../sql';
 import { getOperationDefinition } from './definitions';
 import { parseInputParameters, sendOutputParameters } from './utils/parameters';
-import { findCodeSystem } from './expand';
+import { findTerminologyResource } from './utils/terminology';
 
 const operation = getOperationDefinition('CodeSystem', 'lookup');
 
 type CodeSystemLookupParameters = {
-  code: string;
-  system: string;
-  coding: Coding;
-  property: string[];
+  code?: string;
+  system?: string;
+  version?: string;
+  coding?: Coding;
+  property?: string[];
 };
 
 export async function codeSystemLookupHandler(req: Request, res: Response): Promise<void> {
@@ -30,7 +31,7 @@ export async function codeSystemLookupHandler(req: Request, res: Response): Prom
     return;
   }
 
-  const codeSystem = await findCodeSystem(coding.system as string);
+  const codeSystem = await findTerminologyResource<CodeSystem>('CodeSystem', coding.system as string, params.version);
 
   const lookup = new SelectQuery('Coding');
   const codeSystemTable = lookup.getNextJoinAlias();
@@ -46,7 +47,7 @@ export async function codeSystemLookupHandler(req: Request, res: Response): Prom
     new Condition(new Column(propertyTable, 'coding'), '=', new Column('Coding', 'id'))
   );
   const csPropTable = lookup.getNextJoinAlias();
-  lookup.innerJoin(
+  lookup.leftJoin(
     'CodeSystem_Property',
     csPropTable,
     new Condition(new Column(propertyTable, 'property'), '=', new Column(csPropTable, 'id'))
