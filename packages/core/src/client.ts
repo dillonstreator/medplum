@@ -2879,7 +2879,7 @@ export class MedplumClient extends EventTarget {
     ) {
       const contentLocation = await tryGetContentLocation(response, obj);
       if (contentLocation) {
-        return this.request(contentLocation, { ...options, body: undefined });
+        return this.request(contentLocation, { ...options, method: 'GET', body: undefined });
       }
     }
 
