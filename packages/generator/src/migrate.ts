@@ -4,13 +4,14 @@ import {
   indexSearchParameterBundle,
   indexStructureDefinitionBundle,
   InternalTypeSchema,
+  isPopulated,
   isResourceTypeSchema,
   PropertyType,
   SearchParameterDetails,
   SearchParameterType,
 } from '@medplum/core';
-import { readJson } from '@medplum/definitions';
-import { Bundle, BundleEntry, ResourceType, SearchParameter } from '@medplum/fhirtypes';
+import { readJson, SEARCH_PARAMETER_BUNDLE_FILES } from '@medplum/definitions';
+import { Bundle, ResourceType, SearchParameter } from '@medplum/fhirtypes';
 import { readdirSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { Client } from 'pg';
@@ -25,6 +26,7 @@ interface SchemaDefinition {
 interface TableDefinition {
   name: string;
   columns: ColumnDefinition[];
+  compositePrimaryKey?: string[];
   indexes: IndexDefinition[];
 }
 
@@ -48,21 +50,17 @@ export async function main(): Promise<void> {
   indexStructureDefinitionBundle(readJson('fhir/r4/profiles-resources.json') as Bundle);
   indexStructureDefinitionBundle(readJson('fhir/r4/profiles-medplum.json') as Bundle);
 
-  const searchParamBundle = readJson('fhir/r4/search-parameters.json') as Bundle<SearchParameter>;
-  indexSearchParameterBundle(searchParamBundle);
+  for (const filename of SEARCH_PARAMETER_BUNDLE_FILES) {
+    const bundle = readJson(filename) as Bundle<SearchParameter>;
+    indexSearchParameterBundle(bundle);
 
-  const medplumSearchParamBundle = readJson('fhir/r4/search-parameters-medplum.json') as Bundle<SearchParameter>;
-  indexSearchParameterBundle(medplumSearchParamBundle);
-
-  for (const entry of searchParamBundle.entry as BundleEntry<SearchParameter>[]) {
-    if (entry.resource) {
-      searchParams.push(entry.resource);
+    if (!isPopulated(bundle.entry)) {
+      throw new Error('Empty search parameter bundle: ' + filename);
     }
-  }
-
-  for (const entry of medplumSearchParamBundle.entry as BundleEntry<SearchParameter>[]) {
-    if (entry.resource) {
-      searchParams.push(entry.resource);
+    for (const entry of bundle.entry) {
+      if (entry.resource) {
+        searchParams.push(entry.resource);
+      }
     }
   }
 
@@ -222,7 +220,7 @@ function buildCreateTables(result: SchemaDefinition, resourceType: string, fhirT
     name: resourceType + '_Token',
     columns: [
       { name: 'resourceId', type: 'UUID NOT NULL' },
-      { name: 'index', type: 'INTEGER NOT NULL' },
+      { name: 'index', type: 'INTEGER' },
       { name: 'code', type: 'TEXT NOT NULL' },
       { name: 'system', type: 'TEXT' },
       { name: 'value', type: 'TEXT' },
@@ -233,6 +231,17 @@ function buildCreateTables(result: SchemaDefinition, resourceType: string, fhirT
       { columns: ['system'], indexType: 'btree' },
       { columns: ['value'], indexType: 'btree' },
     ],
+  });
+
+  result.tables.push({
+    name: resourceType + '_References',
+    columns: [
+      { name: 'resourceId', type: 'UUID NOT NULL' },
+      { name: 'targetId', type: 'UUID NOT NULL' },
+      { name: 'code', type: 'TEXT NOT NULL' },
+    ],
+    compositePrimaryKey: ['resourceId', 'targetId', 'code'],
+    indexes: [],
   });
 }
 
@@ -376,12 +385,7 @@ function buildHumanNameTable(result: SchemaDefinition): void {
 function buildLookupTable(result: SchemaDefinition, tableName: string, columns: string[]): void {
   const tableDefinition: TableDefinition = {
     name: tableName,
-    columns: [
-      { name: 'id', type: 'UUID NOT NULL PRIMARY KEY' }, // Deprecated - to be removed
-      { name: 'resourceId', type: 'UUID NOT NULL' },
-      { name: 'index', type: 'INTEGER NOT NULL' },
-      { name: 'content', type: 'TEXT NOT NULL' },
-    ],
+    columns: [{ name: 'resourceId', type: 'UUID NOT NULL' }],
     indexes: [{ columns: ['resourceId'], indexType: 'btree' }],
   };
 
@@ -449,6 +453,10 @@ function writeCreateTable(b: FileBuilder, tableDefinition: TableDefinition): voi
   b.append(')`);');
   b.newLine();
 
+  if (tableDefinition.compositePrimaryKey !== undefined && tableDefinition.compositePrimaryKey.length > 0) {
+    writeAddPrimaryKey(b, tableDefinition, tableDefinition.compositePrimaryKey);
+  }
+
   for (const indexDefinition of tableDefinition.indexes) {
     b.appendNoWrap(`await client.query('${buildIndexSql(tableDefinition.name, indexDefinition)}');`);
   }
@@ -483,6 +491,12 @@ function writeAddColumn(b: FileBuilder, tableDefinition: TableDefinition, column
 function writeUpdateColumn(b: FileBuilder, tableDefinition: TableDefinition, columnDefinition: ColumnDefinition): void {
   b.appendNoWrap(
     `await client.query('ALTER TABLE IF EXISTS "${tableDefinition.name}" ALTER COLUMN "${columnDefinition.name}" TYPE ${columnDefinition.type}');`
+  );
+}
+
+function writeAddPrimaryKey(b: FileBuilder, tableDefinition: TableDefinition, primaryKeyColumns: string[]): void {
+  b.appendNoWrap(
+    `await client.query('ALTER TABLE IF EXISTS "${tableDefinition.name}" ADD PRIMARY KEY (${primaryKeyColumns.map((c) => `"${c}"`).join(', ')})');`
   );
 }
 
@@ -543,9 +557,9 @@ function getNextSchemaVersion(): number {
 function rewriteMigrationExports(): void {
   let exportFile =
     '/*\n' +
-    '* Generated by @medplum/generator\n' +
-    '* Do not edit manually.\n' +
-    '*/\n\n' +
+    ' * Generated by @medplum/generator\n' +
+    ' * Do not edit manually.\n' +
+    ' */\n\n' +
     "export * from './migration';\n";
   const filenamesWithoutExt = getMigrationFilenames()
     .map(getVersionFromFilename)

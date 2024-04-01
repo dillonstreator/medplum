@@ -61,10 +61,6 @@ jobs:
           MEDPLUM_REGISTER_ENABLED: '__MEDPLUM_REGISTER_ENABLED__'
           GOOGLE_CLIENT_ID: '__GOOGLE_CLIENT_ID__'
           RECAPTCHA_SITE_KEY: '__RECAPTCHA_SITE_KEY__'
-      - name: Danger
-        run: npx danger ci
-        env:
-          DANGER_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   eslint:
     name: Run eslint
@@ -151,9 +147,11 @@ jobs:
       matrix:
         node-version: [18, 20]
         pg-version: [12, 14, 16]
+        redis-version: [6, 7]
     env:
       NODE_VERSION: ${{ matrix.node-version }}
       PG_VERSION: ${{ matrix.pg-version }}
+      REDIS_VERSION: ${{ matrix.redis-version }}
       SECRETS_TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
     services:
       postgres:
@@ -170,7 +168,7 @@ jobs:
         ports:
           - 5432/tcp
       redis:
-        image: redis:6
+        image: redis:${{ matrix.redis-version }}
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
@@ -218,7 +216,7 @@ jobs:
           POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
           REDIS_PASSWORD_DISABLED_IN_TESTS: 1
       - name: Upload code coverage
-        if: ${{ matrix.node-version == 20 && matrix.pg-version == 14 }}
+        if: ${{ matrix.node-version == 20 && matrix.pg-version == 14 && matrix.redis-version == 7 }}
         uses: actions/upload-artifact@v4
         with:
           name: medplum-code-coverage

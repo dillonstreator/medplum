@@ -1,7 +1,5 @@
-import { asyncWrap } from '../../async';
-import { Request, Response } from 'express';
-import { parseInputParameters, sendOutputParameters } from './utils/parameters';
-import { getOperationDefinition } from './definitions';
+import { OperationOutcomeError, allOk, badRequest } from '@medplum/core';
+import { FhirRequest, FhirResponse } from '@medplum/fhir-router';
 import {
   CodeSystem,
   CodeableConcept,
@@ -10,12 +8,12 @@ import {
   ValueSetComposeInclude,
   ValueSetComposeIncludeFilter,
 } from '@medplum/fhirtypes';
-import { sendOutcome } from '../outcomes';
-import { OperationOutcomeError, allOk, badRequest } from '@medplum/core';
-import { addPropertyFilter, findAncestor, findTerminologyResource } from './utils/terminology';
-import { validateCode } from './codesystemvalidatecode';
-import { Column, SelectQuery } from '../sql';
 import { getAuthenticatedContext } from '../../context';
+import { Column, SelectQuery } from '../sql';
+import { validateCoding } from './codesystemvalidatecode';
+import { getOperationDefinition } from './definitions';
+import { buildOutputParameters, parseInputParameters } from './utils/parameters';
+import { addPropertyFilter, findAncestor, findTerminologyResource } from './utils/terminology';
 
 const operation = getOperationDefinition('ValueSet', 'validate-code');
 
@@ -32,12 +30,16 @@ type ValueSetValidateCodeParameters = {
 // Implements FHIR "Value Set Validation"
 // http://hl7.org/fhir/R4/valueset-operation-validate-code.html
 
-export const valueSetValidateOperation = asyncWrap(async (req: Request, res: Response) => {
+export async function valueSetValidateOperation(req: FhirRequest): Promise<FhirResponse> {
   const params = parseInputParameters<ValueSetValidateCodeParameters>(operation, req);
 
-  if (!params.url) {
-    sendOutcome(res, badRequest('Missing ValueSet URL'));
-    return;
+  let valueSet: ValueSet;
+  if (req.params.id) {
+    valueSet = await getAuthenticatedContext().repo.readResource<ValueSet>('ValueSet', req.params.id);
+  } else if (params.url) {
+    valueSet = await findTerminologyResource<ValueSet>('ValueSet', params.url);
+  } else {
+    return [badRequest('No ValueSet specified')];
   }
 
   const codings: Coding[] = [];
@@ -48,20 +50,20 @@ export const valueSetValidateOperation = asyncWrap(async (req: Request, res: Res
   } else if (params.codeableConcept?.coding) {
     codings.push(...params.codeableConcept.coding);
   } else {
-    sendOutcome(res, badRequest('No coding specified'));
-    return;
+    return [badRequest('No coding specified')];
   }
 
-  const found = await validateCodingInValueSet(codings, params.url);
+  const found = await validateCodingInValueSet(valueSet, codings);
 
-  await sendOutputParameters(req, res, operation, allOk, {
+  const output = {
     result: Boolean(found) && (!params.display || found?.display === params.display),
     display: found?.display,
-  });
-});
+  };
 
-export async function validateCodingInValueSet(codings: Coding[], valueSetUrl: string): Promise<Coding | undefined> {
-  const valueSet = await findTerminologyResource<ValueSet>('ValueSet', valueSetUrl);
+  return [allOk, buildOutputParameters(operation, output)];
+}
+
+export async function validateCodingInValueSet(valueSet: ValueSet, codings: Coding[]): Promise<Coding | undefined> {
   let found: Coding | undefined;
   if (valueSet.expansion && !valueSet.expansion.parameter) {
     found = valueSet.expansion.contains?.find((e) => codings.some((c) => e.system === c.system && e.code === c.code));
@@ -76,7 +78,7 @@ export async function validateCodingInValueSet(codings: Coding[], valueSetUrl: s
 
   if (found) {
     const codeSystem = await findTerminologyResource<CodeSystem>('CodeSystem', found.system as string);
-    return codeSystem.content !== 'example' ? validateCode(codeSystem, found.code as string) : found;
+    return codeSystem.content !== 'example' ? validateCoding(codeSystem, found) : found;
   }
   return undefined;
 }

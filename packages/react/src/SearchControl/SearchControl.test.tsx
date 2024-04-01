@@ -591,8 +591,9 @@ describe('SearchControl', () => {
       fireEvent.click(screen.getByText('Name'));
     });
 
+    const containsButton = await screen.findByText('Contains...');
     await act(async () => {
-      fireEvent.click(screen.getByText('Contains...'));
+      fireEvent.click(containsButton);
     });
 
     await act(async () => {
@@ -707,11 +708,12 @@ describe('SearchControl', () => {
     });
 
     // Expect the popup menu to be open now
-    expect(screen.getByText('Sort A to Z')).toBeInTheDocument();
+    const sortButton = await screen.findByText('Sort A to Z');
+    expect(sortButton).toBeInTheDocument();
 
     // Click on a sort operation
     await act(async () => {
-      fireEvent.click(screen.getByText('Sort A to Z'));
+      fireEvent.click(sortButton);
     });
 
     // Click on the column header to activate the popup menu
@@ -840,6 +842,36 @@ describe('SearchControl', () => {
       ],
       fields: ['id', '_lastUpdated', 'name'],
     };
+    test('No results', async () => {
+      const props: SearchControlProps = {
+        search,
+        onLoad,
+      };
+      await setup(props, {
+        resourceType: 'Bundle',
+        type: 'searchset',
+        total: 0,
+        entry: [],
+      });
+      expect(await screen.findByText('No results')).toBeInTheDocument();
+      const element = screen.getByTestId('count-display');
+      expect(element.textContent).toBe('0-0 of 0');
+    });
+    test('One result', async () => {
+      const props: SearchControlProps = {
+        search,
+        onLoad,
+      };
+      await setup(props, {
+        resourceType: 'Bundle',
+        type: 'searchset',
+        total: 1,
+        entry: [{ resource: HomerSimpson }],
+      });
+      expect(await screen.findByText('Homer Simpson')).toBeInTheDocument();
+      const element = screen.getByTestId('count-display');
+      expect(element.textContent).toBe('1-1 of 1');
+    });
     test('Single Page', async () => {
       const props: SearchControlProps = {
         search,

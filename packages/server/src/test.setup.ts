@@ -108,7 +108,6 @@ export async function createTestProject<T extends TestProjectOptions = TestProje
           client: createReference(client),
           membership: createReference(membership),
           authTime: new Date().toISOString(),
-          superAdmin: options?.superAdmin,
           scope,
         });
 
@@ -257,7 +256,7 @@ export function waitFor(fn: () => Promise<void>): Promise<void> {
 }
 
 export async function waitForAsyncJob(contentLocation: string, app: Express, accessToken: string): Promise<AsyncJob> {
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 45; i++) {
     const res = await request(app)
       .get(new URL(contentLocation).pathname)
       .set('Authorization', 'Bearer ' + accessToken);

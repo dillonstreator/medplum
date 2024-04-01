@@ -83,6 +83,7 @@ import {
 } from './utils';
 
 export const MEDPLUM_VERSION = import.meta.env.MEDPLUM_VERSION ?? '';
+export const MEDPLUM_CLI_CLIENT_ID = 'medplum-cli';
 export const DEFAULT_ACCEPT = ContentType.FHIR_JSON + ', */*; q=0.1';
 
 const DEFAULT_BASE_URL = 'https://api.medplum.com/';
@@ -813,27 +814,24 @@ export class MedplumClient extends EventTarget {
 
     if (options?.accessToken) {
       this.setAccessToken(options.accessToken);
+    }
+
+    if (this.storage.getInitPromise === undefined) {
+      if (!options?.accessToken) {
+        this.attemptResumeActiveLogin().catch(console.error);
+      }
       this.initPromise = Promise.resolve();
-    } else if (this.storage.getInitPromise !== undefined) {
-      const storageInitPromise = this.storage.getInitPromise();
-      const initPromise = new Promise<void>((resolve, reject) => {
-        storageInitPromise
-          .then(() => {
-            this.attemptResumeActiveLogin()
-              .then(resolve)
-              .catch((error: Error) => {
-                console.error(error);
-                // Resolve here to mirror behavior in the happy path (initPromise should resolve even when error happens in attemptResumeActiveLogin())
-                resolve();
-              });
-            this.initComplete = true;
-          })
-          .catch(reject);
-      });
-      this.initPromise = initPromise;
-      this.initComplete = false;
     } else {
-      this.initPromise = this.attemptResumeActiveLogin().catch(console.error);
+      this.initComplete = false;
+      this.initPromise = this.storage.getInitPromise();
+      this.initPromise
+        .then(() => {
+          if (!options?.accessToken) {
+            this.attemptResumeActiveLogin().catch(console.error);
+          }
+          this.initComplete = true;
+        })
+        .catch(console.error);
     }
 
     this.setupStorageListener();

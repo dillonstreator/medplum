@@ -8,7 +8,7 @@ import {
   parseSearchRequest,
 } from '@medplum/core';
 import { OperationOutcome, Resource, ResourceType } from '@medplum/fhirtypes';
-import type { IncomingHttpHeaders } from 'http';
+import type { IncomingHttpHeaders } from 'node:http';
 import { Operation } from 'rfc6902';
 import { processBatch } from './batch';
 import { graphqlHandler } from './graphql';
@@ -152,6 +152,10 @@ export class FhirRouter extends EventTarget {
     this.router.add('DELETE', ':resourceType/:id', deleteResource);
     this.router.add('PATCH', ':resourceType/:id', patchResource);
     this.router.add('POST', '$graphql', graphqlHandler);
+  }
+
+  add(method: HttpMethod, path: string, handler: FhirRouteHandler): void {
+    this.router.add(method, path, handler);
   }
 
   async handleRequest(req: FhirRequest, repo: FhirRepository): Promise<FhirResponse> {

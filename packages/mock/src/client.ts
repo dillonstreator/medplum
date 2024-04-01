@@ -1,10 +1,7 @@
 import {
-  allOk,
-  badRequest,
+  BinarySource,
   ContentType,
-  getStatus,
-  indexSearchParameter,
-  loadDataType,
+  CreateBinaryOptions,
   LoginState,
   MedplumClient,
   MedplumClientOptions,
@@ -12,6 +9,12 @@ import {
   OperationOutcomeError,
   ProfileResource,
   SubscriptionEmitter,
+  allOk,
+  badRequest,
+  getStatus,
+  indexSearchParameter,
+  loadDataType,
+  normalizeCreateBinaryOptions,
 } from '@medplum/core';
 import { FhirRequest, FhirRouter, HttpMethod, MemoryRepository } from '@medplum/fhir-router';
 import {
@@ -38,7 +41,8 @@ import {
   ExampleQuestionnaire,
   ExampleQuestionnaireResponse,
   ExampleSubscription,
-  exampleValueSet,
+  ExampleThreadHeader,
+  ExampleThreadMessages,
   HomerCommunication,
   HomerDiagnosticReport,
   HomerEncounter,
@@ -55,11 +59,12 @@ import {
   HomerSimpson,
   HomerSimpsonPreviousVersion,
   HomerSimpsonSpecimen,
-  makeDrAliceSmithSlots,
   TestOrganization,
+  exampleValueSet,
+  makeDrAliceSmithSlots,
 } from './mocks';
 import { ExampleAccessPolicy, ExampleStatusValueSet, ExampleUserConfiguration } from './mocks/accesspolicy';
-import { TestProject, TestProjectMembersihp } from './mocks/project';
+import { TestProject, TestProjectMembership } from './mocks/project';
 import SearchParameterList from './mocks/searchparameters.json';
 import { ExampleSmartClientApplication } from './mocks/smart';
 import StructureDefinitionList from './mocks/structuredefinitions.json';
@@ -92,7 +97,7 @@ export class MockClient extends MedplumClient {
   readonly debug: boolean;
   activeLoginOverride?: LoginState;
   private agentAvailable = true;
-  private readonly profile: ReturnType<MedplumClient['getProfile']>;
+  private profile: ReturnType<MedplumClient['getProfile']>;
   subManager: MockSubscriptionManager | undefined;
 
   constructor(clientOptions?: MockClientOptions) {
@@ -158,6 +163,11 @@ export class MockClient extends MedplumClient {
     this.activeLoginOverride = activeLoginOverride;
   }
 
+  setProfile(profile: ProfileResource | undefined): void {
+    this.profile = profile;
+    this.dispatchEvent({ type: 'change' });
+  }
+
   getActiveLogin(): LoginState | undefined {
     if (this.activeLoginOverride !== undefined) {
       return this.activeLoginOverride;
@@ -173,11 +183,14 @@ export class MockClient extends MedplumClient {
   }
 
   async createBinary(
-    data: string | File | Blob | Uint8Array,
-    filename: string | undefined,
-    contentType: string,
-    onProgress?: (e: ProgressEvent) => void
+    arg1: BinarySource | CreateBinaryOptions,
+    arg2: string | undefined | MedplumRequestOptions,
+    arg3?: string,
+    arg4?: (e: ProgressEvent) => void
   ): Promise<Binary> {
+    const createBinaryOptions = normalizeCreateBinaryOptions(arg1, arg2, arg3, arg4);
+    const { filename, contentType, onProgress } = createBinaryOptions;
+
     if (filename?.endsWith('.exe')) {
       return Promise.reject(badRequest('Invalid file type'));
     }
@@ -234,7 +247,9 @@ round-trip min/avg/max/stddev = 10.977/14.975/23.159/4.790 ms
 
   getSubscriptionManager(): MockSubscriptionManager {
     if (!this.subManager) {
-      this.subManager = new MockSubscriptionManager(this, 'wss://example.com/ws/subscriptions-r4');
+      this.subManager = new MockSubscriptionManager(this, 'wss://example.com/ws/subscriptions-r4', {
+        mockRobustWebSocket: true,
+      });
     }
     return this.subManager;
   }
@@ -584,8 +599,10 @@ export class MockFetchClient {
       ExampleWorkflowRequestGroup,
       ExampleSmartClientApplication,
       TestProject,
-      TestProjectMembersihp,
-    ];
+      TestProjectMembership,
+      ExampleThreadHeader,
+      ...ExampleThreadMessages,
+    ] satisfies Resource[];
 
     for (const resource of defaultResources) {
       await this.repo.createResource(resource);

@@ -39,6 +39,7 @@ import {
 import { BaseRepository, FhirRepository } from '@medplum/fhir-router';
 import {
   AccessPolicy,
+  Binary,
   Bundle,
   BundleEntry,
   Meta,
@@ -171,7 +172,7 @@ export interface CacheEntry<T extends Resource = Resource> {
 /**
  * The lookup tables array includes a list of special tables for search indexing.
  */
-const lookupTables: LookupTable<unknown>[] = [
+const lookupTables: LookupTable[] = [
   new AddressTable(),
   new HumanNameTable(),
   new TokenTable(),
@@ -527,8 +528,8 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
       throw new OperationOutcomeError(forbidden);
     }
 
-    await this.handleBinaryData(result);
-    await this.handleMaybeCacheOnly(result);
+    await this.handleBinaryUpdate(existing, result);
+    await this.handleMaybeCacheOnly(result, create);
     await setCacheEntry(result);
     await addBackgroundJobs(result, { interaction: create ? 'create' : 'update' });
     this.removeHiddenFields(result);
@@ -536,17 +537,32 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
   }
 
   /**
+   * Handles a Binary resource update.
+   * If the resource has embedded base-64 data, writes the data to the binary storage.
+   * Otherwise if the resource already exists, copies the existing binary to the new resource.
+   * @param existing - Existing binary if it exists.
+   * @param resource - The resource to write to the database.
+   */
+  private async handleBinaryUpdate<T extends Resource>(existing: T | undefined, resource: T): Promise<void> {
+    if (resource.resourceType !== 'Binary') {
+      return;
+    }
+
+    if (resource.data) {
+      await this.handleBinaryData(resource);
+    } else if (existing) {
+      await getBinaryStorage().copyBinary(existing as Binary, resource);
+    }
+  }
+
+  /**
    * Handles a Binary resource with embedded base-64 data.
    * Writes the data to the binary storage and removes the data field from the resource.
    * @param resource - The resource to write to the database.
    */
-  private async handleBinaryData(resource: Resource): Promise<void> {
-    if (resource.resourceType !== 'Binary' || !resource.data) {
-      return;
-    }
-
+  private async handleBinaryData(resource: Binary): Promise<void> {
     // Parse result.data as a base64 string
-    const buffer = Buffer.from(resource.data, 'base64');
+    const buffer = Buffer.from(resource.data as string, 'base64');
 
     // Convert buffer to a Readable stream
     const stream = new Readable({
@@ -563,9 +579,9 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
     resource.data = undefined;
   }
 
-  private async handleMaybeCacheOnly(result: Resource): Promise<void> {
+  private async handleMaybeCacheOnly(result: Resource, create: boolean): Promise<void> {
     if (!this.isCacheOnly(result)) {
-      await this.writeToDatabase(result);
+      await this.writeToDatabase(result, create);
     } else if (result.resourceType === 'Subscription' && result.channel?.type === 'websocket') {
       const redis = getRedis();
       const project = result?.meta?.project;
@@ -680,12 +696,13 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
    * Writes the resource to the database.
    * This is a single atomic operation inside of a transaction.
    * @param resource - The resource to write to the database.
+   * @param create - If true, then the resource is being created.
    */
-  private async writeToDatabase<T extends Resource>(resource: T): Promise<void> {
+  private async writeToDatabase<T extends Resource>(resource: T, create: boolean): Promise<void> {
     await this.withTransaction(async (client) => {
       await this.writeResource(client, resource);
       await this.writeResourceVersion(client, resource);
-      await this.writeLookupTables(client, resource);
+      await this.writeLookupTables(client, resource, create);
     });
   }
 
@@ -769,23 +786,15 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
    * This is only available to super admins.
    * @param resourceType - The resource type.
    */
-  async rebuildCompartmentsForResourceType(resourceType: string): Promise<void> {
+  async rebuildCompartmentsForResourceType(resourceType: ResourceType): Promise<void> {
     if (!this.isSuperAdmin()) {
       throw new OperationOutcomeError(forbidden);
     }
 
-    // Do not use this.getDatabaseClient() for the cursor!
-    // That would cause a deadlock.
-    // Instead, use getDatabasePool() directly over a separate connection.
-    const client = getDatabasePool();
-    const builder = new SelectQuery(resourceType).column({ tableName: resourceType, columnName: 'content' });
-    this.addDeletedFilter(builder);
-
-    await builder.executeCursor(client, async (row: any) => {
+    await this.forAllResources(resourceType, async (resource) => {
       try {
-        const resource = JSON.parse(row.content) as Resource;
         (resource.meta as Meta).compartment = this.getCompartments(resource);
-        await this.updateResourceImpl(JSON.parse(row.content) as Resource, false);
+        await this.updateResourceImpl(resource, false);
       } catch (err) {
         getLogger().error('Failed to rebuild compartments for resource', {
           error: normalizeErrorString(err),
@@ -800,25 +809,69 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
    * This should not result in any change to resources or history.
    * @param resourceType - The resource type.
    */
-  async reindexResourceType(resourceType: string): Promise<void> {
+  async reindexResourceType(resourceType: ResourceType): Promise<void> {
     if (!this.isSuperAdmin()) {
       throw new OperationOutcomeError(forbidden);
     }
 
-    // Do not use this.getDatabaseClient() for the cursor!
-    // That would cause a deadlock.
-    // Instead, use getDatabasePool() directly over a separate connection.
-    const client = getDatabasePool();
-    const builder = new SelectQuery(resourceType).column({ tableName: resourceType, columnName: 'content' });
-    this.addDeletedFilter(builder);
-
-    await builder.executeCursor(client, async (row: any) => {
+    await this.forAllResources(resourceType, async (resource) => {
       try {
-        await this.reindexResourceImpl(JSON.parse(row.content) as Resource);
+        await this.reindexResourceImpl(resource);
       } catch (err) {
         getLogger().error('Failed to reindex resource', { error: normalizeErrorString(err) });
       }
     });
+  }
+
+  /**
+   * Loops over all resources of the specified type and executes the callback function.
+   *
+   * Search for all resources of the specified type.
+   * Order by lastUpdated ascending to process oldest resources first.
+   *
+   * Historically, we used database cursors for this functionality.
+   * However, for large tables (1 million+ rows), the cursor approach caused performance issues.
+   *
+   * Instead, this implementation uses a search query with a sort by lastUpdated.
+   * This will be slower than the cursor approach, but it is more reliable.
+   *
+   * @param resourceType - The resource type.
+   * @param callback - The callback function to be executed for each resource of the specified type.
+   */
+  async forAllResources<T extends Resource>(
+    resourceType: T['resourceType'],
+    callback: (resource: T) => Promise<void>
+  ): Promise<void> {
+    const batchSize = 1000;
+    let hasMore = true;
+    let currentTimestamp: string | undefined = undefined;
+
+    while (hasMore) {
+      const searchRequest: SearchRequest<T> = {
+        resourceType,
+        count: batchSize,
+        sortRules: [{ code: '_lastUpdated', descending: false }],
+      };
+
+      if (currentTimestamp) {
+        searchRequest.filters = [
+          { code: '_lastUpdated', operator: Operator.GREATER_THAN_OR_EQUALS, value: currentTimestamp },
+        ];
+      }
+
+      const bundle = await this.search(searchRequest);
+      if (bundle.entry) {
+        for (const entry of bundle.entry) {
+          const resource = entry.resource as T;
+          await callback(resource);
+
+          const lastUpdated = resource.meta?.lastUpdated as string;
+          currentTimestamp = lastUpdated;
+        }
+      }
+
+      hasMore = !!bundle.link?.find((link) => link.relation === 'next');
+    }
   }
 
   /**
@@ -852,7 +905,7 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
 
     await this.withTransaction(async (conn) => {
       await this.writeResource(conn, resource);
-      await this.writeLookupTables(conn, resource);
+      await this.writeLookupTables(conn, resource, false);
     });
   }
 
@@ -1001,13 +1054,7 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
 
   async search<T extends Resource>(searchRequest: SearchRequest<T>): Promise<Bundle<T>> {
     try {
-      const resourceType = searchRequest.resourceType;
-      validateResourceType(resourceType);
-
-      if (!this.canReadResourceType(resourceType)) {
-        throw new OperationOutcomeError(forbidden);
-      }
-
+      // Resource type validation is performed in the searchImpl function
       const result = await searchImpl(this, searchRequest);
       this.logEvent(SearchInteraction, AuditEventOutcome.Success, undefined, undefined, searchRequest);
       return result;
@@ -1426,10 +1473,11 @@ export class Repository extends BaseRepository implements FhirRepository<PoolCli
    * Writes resources values to the lookup tables.
    * @param client - The database client inside the transaction.
    * @param resource - The resource to index.
+   * @param create - If true, then the resource is being created.
    */
-  private async writeLookupTables(client: PoolClient, resource: Resource): Promise<void> {
+  private async writeLookupTables(client: PoolClient, resource: Resource, create: boolean): Promise<void> {
     for (const lookupTable of lookupTables) {
-      await lookupTable.indexResource(client, resource);
+      await lookupTable.indexResource(client, resource, create);
     }
   }
 
@@ -1872,7 +1920,7 @@ export function isIndexTable(resourceType: string, searchParam: SearchParameter)
   return !!getLookupTable(resourceType, searchParam);
 }
 
-export function getLookupTable(resourceType: string, searchParam: SearchParameter): LookupTable<unknown> | undefined {
+export function getLookupTable(resourceType: string, searchParam: SearchParameter): LookupTable | undefined {
   for (const lookupTable of lookupTables) {
     if (lookupTable.isIndexed(searchParam, resourceType)) {
       return lookupTable;

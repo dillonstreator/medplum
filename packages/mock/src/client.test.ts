@@ -297,12 +297,12 @@ describe('MockClient', () => {
 
   test('Create PDF', async () => {
     const client = new MockClient();
-    const result = await client.createPdf({ content: ['Hello World'] });
+    const result = await client.createPdf({ docDefinition: { content: ['Hello World'] } });
     expect(result).toBeDefined();
 
     console.log = jest.fn();
     const client2 = new MockClient({ debug: true });
-    const result2 = await client2.createPdf({ content: ['Hello World'] });
+    const result2 = await client2.createPdf({ docDefinition: { content: ['Hello World'] } });
     expect(result2).toBeDefined();
     expect(console.log).toHaveBeenCalled();
   });
@@ -670,6 +670,16 @@ describe('MockClient', () => {
     expect(homer).toBeDefined();
     expect(homer.name[0].given[0]).toEqual('Homer');
     expect(homer.name[0].family).toEqual('Simpson');
+  });
+
+  test('setProfile()', async () => {
+    const medplum = new MockClient({ profile: null });
+    expect(medplum.getProfile()).toBeUndefined();
+    const callback = jest.fn();
+    medplum.addEventListener('change', callback);
+    medplum.setProfile(DrAliceSmith);
+    expect(medplum.getProfile()).toEqual(DrAliceSmith);
+    expect(callback).toHaveBeenCalledTimes(1);
   });
 
   test('pushToAgent() -- Valid IP', async () => {
