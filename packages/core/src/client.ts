@@ -74,12 +74,15 @@ import {
   CodeChallengeMethod,
   ProfileResource,
   arrayBufferToBase64,
+  concatUrls,
   createReference,
+  ensureTrailingSlash,
   getReferenceString,
   getWebSocketUrl,
   isObject,
   resolveId,
   sleep,
+  sortStringArray,
 } from './utils';
 
 export const MEDPLUM_VERSION = import.meta.env.MEDPLUM_VERSION ?? '';
@@ -788,7 +791,7 @@ export class MedplumClient extends EventTarget {
     this.storage = options?.storage ?? new ClientStorage();
     this.createPdfImpl = options?.createPdf;
     this.baseUrl = ensureTrailingSlash(options?.baseUrl ?? DEFAULT_BASE_URL);
-    this.fhirBaseUrl = ensureTrailingSlash(concatUrls(this.baseUrl, options?.fhirUrlPath ?? 'fhir/R4/'));
+    this.fhirBaseUrl = concatUrls(this.baseUrl, options?.fhirUrlPath ?? 'fhir/R4');
     this.authorizeUrl = concatUrls(this.baseUrl, options?.authorizeUrl ?? 'oauth2/authorize');
     this.tokenUrl = concatUrls(this.baseUrl, options?.tokenUrl ?? 'oauth2/token');
     this.logoutUrl = concatUrls(this.baseUrl, options?.logoutUrl ?? 'oauth2/logout');
@@ -956,7 +959,7 @@ export class MedplumClient extends EventTarget {
    * @param resourceType - The resource type to invalidate.
    */
   invalidateSearches<K extends ResourceType>(resourceType: K): void {
-    const url = this.fhirBaseUrl + resourceType;
+    const url = concatUrls(this.fhirBaseUrl, resourceType);
     if (this.requestCache) {
       for (const key of this.requestCache.keys()) {
         if (key.endsWith(url) || key.includes(url + '?')) {
@@ -1349,7 +1352,7 @@ export class MedplumClient extends EventTarget {
    * @returns The well-formed FHIR URL.
    */
   fhirUrl(...path: string[]): URL {
-    return new URL(path.join('/'), this.fhirBaseUrl);
+    return new URL(concatUrls(this.fhirBaseUrl, path.join('/')));
   }
 
   /**
@@ -2469,7 +2472,7 @@ export class MedplumClient extends EventTarget {
    * @returns The FHIR batch/transaction response bundle.
    */
   executeBatch(bundle: Bundle, options?: MedplumRequestOptions): Promise<Bundle> {
-    return this.post(this.fhirBaseUrl.slice(0, -1), bundle, undefined, options);
+    return this.post(this.fhirBaseUrl, bundle, undefined, options);
   }
 
   /**
@@ -3094,7 +3097,7 @@ export class MedplumClient extends EventTarget {
 
   private async fetchWithRetry(url: string, options: MedplumRequestOptions): Promise<Response> {
     if (!url.startsWith('http')) {
-      url = new URL(url, this.baseUrl).href;
+      url = concatUrls(this.baseUrl, url);
     }
 
     const maxRetries = 3;
@@ -3124,9 +3127,8 @@ export class MedplumClient extends EventTarget {
     console.log(`> ${options.method} ${url}`);
     if (options.headers) {
       const headers = options.headers as Record<string, string>;
-      const entries = Object.entries(headers).sort((a, b) => a[0].localeCompare(b[0]));
-      for (const [key, value] of entries) {
-        console.log(`> ${key}: ${value}`);
+      for (const key of sortStringArray(Object.keys(headers))) {
+        console.log(`> ${key}: ${headers[key]}`);
       }
     }
   }
@@ -3175,7 +3177,7 @@ export class MedplumClient extends EventTarget {
       const entry = entries[0];
       try {
         entry.options.method = entry.method;
-        entry.resolve(await this.request(this.fhirBaseUrl + entry.url, entry.options));
+        entry.resolve(await this.request(concatUrls(this.fhirBaseUrl, entry.url), entry.options));
       } catch (err) {
         entry.reject(new OperationOutcomeError(normalizeOperationOutcome(err)));
       }
@@ -3199,7 +3201,7 @@ export class MedplumClient extends EventTarget {
     };
 
     // Execute the batch request
-    const response = (await this.post(this.fhirBaseUrl.slice(0, -1), batch)) as Bundle;
+    const response = (await this.post(this.fhirBaseUrl, batch)) as Bundle;
 
     // Process the response
     for (let i = 0; i < entries.length; i++) {
@@ -3769,7 +3771,7 @@ export class MedplumClient extends EventTarget {
    */
   getSubscriptionManager(): SubscriptionManager {
     if (!this.subscriptionManager) {
-      this.subscriptionManager = new SubscriptionManager(this, getWebSocketUrl('/ws/subscriptions-r4', this.baseUrl));
+      this.subscriptionManager = new SubscriptionManager(this, getWebSocketUrl(this.baseUrl, '/ws/subscriptions-r4'));
     }
     return this.subscriptionManager;
   }
@@ -3870,28 +3872,6 @@ function getWindowOrigin(): string {
     return '';
   }
   return window.location.protocol + '//' + window.location.host + '/';
-}
-
-/**
- * Ensures the given URL has a trailing slash.
- * @param url - The URL to ensure has a trailing slash.
- * @returns The URL with a trailing slash.
- */
-function ensureTrailingSlash(url: string): string {
-  return url.endsWith('/') ? url : url + '/';
-}
-
-/**
- * Concatenates the given base URL and URL.
- *
- * If the URL is absolute, it is returned as-is.
- *
- * @param baseUrl - The base URL.
- * @param url - The URL to concat. Can be relative or absolute.
- * @returns The concatenated URL.
- */
-export function concatUrls(baseUrl: string, url: string): string {
-  return new URL(url, baseUrl).toString();
 }
 
 /**
