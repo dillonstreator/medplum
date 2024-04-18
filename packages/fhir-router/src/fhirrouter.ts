@@ -20,6 +20,7 @@ import { processBatch } from './batch';
 import { graphqlHandler } from './graphql';
 import { CreateResourceOptions, FhirRepository, UpdateResourceOptions } from './repo';
 import { HttpMethod, RouteResult, Router } from './urlrouter';
+import { Locker } from './lock';
 
 export type FhirRequest = {
   method: HttpMethod;
@@ -32,19 +33,19 @@ export type FhirRequest = {
 
 export type FhirResponse = [OperationOutcome] | [OperationOutcome, Resource];
 
-export type FhirRouteHandler = (req: FhirRequest, repo: FhirRepository, router: FhirRouter) => Promise<FhirResponse>;
+export type FhirRouteHandler = (req: FhirRequest, repo: FhirRepository, locker: Locker, router: FhirRouter) => Promise<FhirResponse>;
 
 export interface FhirOptions {
   introspectionEnabled?: boolean;
 }
 
 // Execute batch
-async function batch(req: FhirRequest, repo: FhirRepository, router: FhirRouter): Promise<FhirResponse> {
+async function batch(req: FhirRequest, repo: FhirRepository, locker: Locker, router: FhirRouter): Promise<FhirResponse> {
   const bundle = req.body as Resource;
   if (bundle.resourceType !== 'Bundle') {
     return [badRequest('Not a bundle')];
   }
-  const result = await processBatch(router, repo, bundle);
+  const result = await processBatch(router, repo, locker, bundle);
   return [allOk, result];
 }
 
@@ -222,7 +223,7 @@ export class FhirRouter extends EventTarget {
     return this.router.find(method, path);
   }
 
-  async handleRequest(req: FhirRequest, repo: FhirRepository): Promise<FhirResponse> {
+  async handleRequest(req: FhirRequest, repo: FhirRepository, locker: Locker): Promise<FhirResponse> {
     const result = this.router.find(req.method, req.pathname);
     if (!result) {
       return [notFound];
@@ -230,7 +231,7 @@ export class FhirRouter extends EventTarget {
     const { handler, params } = result;
     req.params = params;
     try {
-      return await handler(req, repo, this);
+      return await handler(req, repo, locker, this);
     } catch (err) {
       return [normalizeOperationOutcome(err)];
     }

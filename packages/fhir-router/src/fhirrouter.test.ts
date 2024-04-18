@@ -12,6 +12,7 @@ import { Bundle, BundleEntry, OperationOutcome, SearchParameter, Patient } from 
 import { randomUUID } from 'crypto';
 import { FhirRequest, FhirRouter } from './fhirrouter';
 import { FhirRepository, MemoryRepository } from './repo';
+import { InMemoryLocker } from './lock';
 
 const router: FhirRouter = new FhirRouter();
 const repo: FhirRepository = new MemoryRepository();
@@ -45,7 +46,10 @@ describe('FHIR Router', () => {
       params: {},
       query: {},
     };
-    const [outcome, bundle] = (await router.handleRequest(request, repo)) as [OperationOutcome, Bundle];
+    const [outcome, bundle] = (await router.handleRequest(request, repo, new InMemoryLocker())) as [
+      OperationOutcome,
+      Bundle,
+    ];
     expect(outcome).toMatchObject(allOk);
     expect(bundle).toBeDefined();
     expect(bundle.entry).toBeDefined();
@@ -63,7 +67,7 @@ describe('FHIR Router', () => {
       params: {},
       query: {},
     };
-    const [outcome] = await router.handleRequest(request, repo);
+    const [outcome] = await router.handleRequest(request, repo, new InMemoryLocker());
     expect(outcome).toMatchObject(badRequest('Not a bundle'));
   });
 
@@ -79,7 +83,8 @@ describe('FHIR Router', () => {
         params: {},
         query: {},
       },
-      repo
+      repo,
+      new InMemoryLocker()
     );
     expect(res1).toMatchObject(created);
     expect(patient).toBeDefined();
@@ -92,7 +97,8 @@ describe('FHIR Router', () => {
         params: {},
         query: {},
       },
-      repo
+      repo,
+      new InMemoryLocker()
     );
     expect(res2).toMatchObject(allOk);
     expect(patient2).toBeDefined();
@@ -105,7 +111,8 @@ describe('FHIR Router', () => {
         params: {},
         query: {},
       },
-      repo
+      repo,
+      new InMemoryLocker()
     );
     expect(res3).toMatchObject(allOk);
     expect(patient3).toBeDefined();
@@ -120,7 +127,8 @@ describe('FHIR Router', () => {
         params: {},
         query: {},
       },
-      repo
+      repo,
+      new InMemoryLocker()
     );
     expect(res2).toMatchObject(notFound);
     expect(patient2).toBeUndefined();
@@ -133,7 +141,8 @@ describe('FHIR Router', () => {
         params: {},
         query: {},
       },
-      repo
+      repo,
+      new InMemoryLocker()
     );
     expect(res3).toMatchObject(notFound);
     expect(patient3).toBeUndefined();
@@ -151,7 +160,8 @@ describe('FHIR Router', () => {
         params: {},
         query: {},
       },
-      repo
+      repo,
+      new InMemoryLocker()
     );
     expect(res).toMatchObject(badRequest('Incorrect resource type'));
   });
@@ -168,7 +178,8 @@ describe('FHIR Router', () => {
         params: {},
         query: {},
       },
-      repo
+      repo,
+      new InMemoryLocker()
     );
     expect(res).toMatchObject(badRequest('Incorrect resource ID'));
   });
@@ -184,7 +195,8 @@ describe('FHIR Router', () => {
         query: {},
         headers: { 'if-match': 'W/"incorrect"' },
       },
-      repo
+      repo,
+      new InMemoryLocker()
     );
     expect(res).toMatchObject(preconditionFailed);
   });
@@ -200,7 +212,8 @@ describe('FHIR Router', () => {
         params: {},
         query: {},
       },
-      repo
+      repo,
+      new InMemoryLocker()
     );
     expect(res).toMatchObject(allOk);
     expect(bundle).toBeDefined();
@@ -217,7 +230,8 @@ describe('FHIR Router', () => {
           _type: 'Patient,Observation',
         },
       },
-      repo
+      repo,
+      new InMemoryLocker()
     );
     expect(res).toMatchObject(allOk);
     expect(bundle).toBeDefined();
@@ -239,7 +253,8 @@ describe('FHIR Router', () => {
           identifier: 'http://example.com/mrn|' + mrn,
         },
       },
-      repo
+      repo,
+      new InMemoryLocker()
     );
     expect(res).toMatchObject(created);
     expect(resource).toMatchObject(patient);

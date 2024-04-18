@@ -16,7 +16,7 @@ import {
   loadDataType,
   normalizeCreateBinaryOptions,
 } from '@medplum/core';
-import { FhirRequest, FhirRouter, HttpMethod, MemoryRepository } from '@medplum/fhir-router';
+import { FhirRequest, FhirRouter, HttpMethod, Locker, MemoryRepository, InMemoryLocker } from '@medplum/fhir-router';
 import {
   Agent,
   Binary,
@@ -93,6 +93,7 @@ export interface MockClientOptions extends MedplumClientOptions {
 export class MockClient extends MedplumClient {
   readonly router: FhirRouter;
   readonly repo: MemoryRepository;
+  readonly locker: Locker;
   readonly client: MockFetchClient;
   readonly debug: boolean;
   activeLoginOverride?: LoginState;
@@ -103,9 +104,10 @@ export class MockClient extends MedplumClient {
   constructor(clientOptions?: MockClientOptions) {
     const router = new FhirRouter();
     const repo = new MemoryRepository();
+    const locker = new InMemoryLocker();
 
     const baseUrl = clientOptions?.baseUrl ?? 'https://example.com/';
-    const client = new MockFetchClient(router, repo, baseUrl, clientOptions?.debug);
+    const client = new MockFetchClient(router, repo, locker, baseUrl, clientOptions?.debug);
 
     super({
       baseUrl,
@@ -123,6 +125,7 @@ export class MockClient extends MedplumClient {
 
     this.router = router;
     this.repo = repo;
+    this.locker = locker;
     this.client = client;
     // if null is specified, treat it as if no one is logged in
     this.profile = clientOptions?.profile === null ? undefined : clientOptions?.profile ?? DrAliceSmith;
@@ -279,6 +282,7 @@ export class MockFetchClient {
   constructor(
     readonly router: FhirRouter,
     readonly repo: MemoryRepository,
+    readonly locker: Locker,
     readonly baseUrl: string,
     readonly debug = false
   ) {}
@@ -657,7 +661,7 @@ export class MockFetchClient {
       query: Object.fromEntries(parsedUrl.searchParams),
     };
 
-    const result = await this.router.handleRequest(request, this.repo);
+    const result = await this.router.handleRequest(request, this.repo, this.locker);
     if (result.length === 1) {
       return result[0];
     } else {

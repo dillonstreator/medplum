@@ -47,6 +47,7 @@ import {
   parseSearchArgs,
   resolveBySearch,
 } from './utils';
+import { Locker } from '../lock';
 
 /**
  * Cache of "introspection" query results.
@@ -79,12 +80,14 @@ interface ConnectionEdge {
  * See: https://www.hl7.org/fhir/graphql.html
  * @param req - The request details.
  * @param repo - The current user FHIR repository.
+ * @param locker - The locker.
  * @param router - The router for router options.
  * @returns The response.
  */
 export async function graphqlHandler(
   req: FhirRequest,
   repo: FhirRepository,
+  locker: Locker,
   router: FhirRouter
 ): Promise<FhirResponse> {
   const { query, operationName, variables } = req.body;

@@ -272,7 +272,7 @@ protectedRoutes.use(
       headers: req.headers,
     };
 
-    const result = await getInternalFhirRouter().handleRequest(request, ctx.repo);
+    const result = await getInternalFhirRouter().handleRequest(request, ctx.repo, ctx.locker);
     if (result.length === 1) {
       if (!isOk(result[0])) {
         throw new OperationOutcomeError(result[0]);

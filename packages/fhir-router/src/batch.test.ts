@@ -29,6 +29,7 @@ import { randomUUID } from 'crypto';
 import { processBatch } from './batch';
 import { FhirRouter } from './fhirrouter';
 import { FhirRepository, MemoryRepository } from './repo';
+import { InMemoryLocker } from './lock';
 
 const router: FhirRouter = new FhirRouter();
 const repo: FhirRepository = new MemoryRepository();
@@ -42,7 +43,7 @@ describe('Batch', () => {
 
   test('Process batch with missing bundle type', async () => {
     try {
-      await processBatch(router, repo, { resourceType: 'Bundle' } as Bundle);
+      await processBatch(router, repo, new InMemoryLocker(), { resourceType: 'Bundle' } as Bundle);
       fail('Expected error');
     } catch (err) {
       const outcome = (err as OperationOutcomeError).outcome;
@@ -53,7 +54,10 @@ describe('Batch', () => {
 
   test('Process batch with invalid bundle type', async () => {
     try {
-      await processBatch(router, repo, { resourceType: 'Bundle', type: 'xyz' as unknown as 'batch' });
+      await processBatch(router, repo, new InMemoryLocker(), {
+        resourceType: 'Bundle',
+        type: 'xyz' as unknown as 'batch',
+      });
       fail('Expected error');
     } catch (err) {
       const outcome = (err as OperationOutcomeError).outcome;
@@ -64,7 +68,7 @@ describe('Batch', () => {
 
   test('Process batch with missing entries', async () => {
     try {
-      await processBatch(router, repo, { resourceType: 'Bundle', type: 'batch' });
+      await processBatch(router, repo, new InMemoryLocker(), { resourceType: 'Bundle', type: 'batch' });
       fail('Expected error');
     } catch (err) {
       const outcome = (err as OperationOutcomeError).outcome;
@@ -77,7 +81,7 @@ describe('Batch', () => {
     const patientId = randomUUID();
     const observationId = randomUUID();
 
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -161,7 +165,7 @@ describe('Batch', () => {
   });
 
   test('Process batch create success', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -185,7 +189,7 @@ describe('Batch', () => {
   });
 
   test('Process batch create missing resource', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -206,7 +210,7 @@ describe('Batch', () => {
   });
 
   test('Process batch create missing resourceType', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -228,7 +232,7 @@ describe('Batch', () => {
   });
 
   test.skip('Process batch create missing required properties', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -252,7 +256,7 @@ describe('Batch', () => {
   });
 
   test('Process batch create ignore http fullUrl', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -279,7 +283,7 @@ describe('Batch', () => {
   test('Process batch create does not rewrite identifier', async () => {
     const id = randomUUID();
 
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -319,7 +323,7 @@ describe('Batch', () => {
   test('Process batch create ifNoneExist success', async () => {
     const identifier = randomUUID();
 
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -370,7 +374,7 @@ describe('Batch', () => {
   test.skip('Process batch create ifNoneExist invalid resource type', async () => {
     const identifier = randomUUID();
 
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -401,7 +405,7 @@ describe('Batch', () => {
     // First, intentionally create 2 patients with duplicate identifiers
     // Then, the 3rd entry use ifNoneExists
     // The search will return 2 patients, which causes the entry to fail
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -479,7 +483,7 @@ describe('Batch', () => {
     // Execute a batch that looks for the practitioner and references the result
     // Use ifNoneExist, which should return the existing practitioner
     const urnUuid = 'urn:uuid:' + randomUUID();
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -518,7 +522,7 @@ describe('Batch', () => {
       resourceType: 'Patient',
     });
 
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -543,7 +547,7 @@ describe('Batch', () => {
   });
 
   test('Process batch update missing resource', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -568,7 +572,7 @@ describe('Batch', () => {
       resourceType: 'Patient',
     });
 
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -601,7 +605,7 @@ describe('Batch', () => {
       subject: { reference: 'Patient/' + randomUUID() },
     });
 
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -639,7 +643,7 @@ describe('Batch', () => {
       subject: { reference: 'Patient/' + randomUUID() },
     });
 
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -670,7 +674,7 @@ describe('Batch', () => {
   });
 
   test.skip('Process batch patch invalid url', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -692,7 +696,7 @@ describe('Batch', () => {
   });
 
   test('Process batch patch missing resource', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -716,7 +720,7 @@ describe('Batch', () => {
   });
 
   test('Process batch patch wrong pach type', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -743,7 +747,7 @@ describe('Batch', () => {
   });
 
   test('Process batch patch wrong pach type', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -774,7 +778,7 @@ describe('Batch', () => {
       resourceType: 'Patient',
     });
 
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -795,7 +799,7 @@ describe('Batch', () => {
   });
 
   test('Process batch delete invalid URL', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -816,7 +820,7 @@ describe('Batch', () => {
   });
 
   test('Process batch missing request', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -837,7 +841,7 @@ describe('Batch', () => {
   });
 
   test('Process batch missing request.method', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -863,7 +867,7 @@ describe('Batch', () => {
   });
 
   test('Process batch unsupported request.method', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -884,7 +888,7 @@ describe('Batch', () => {
   });
 
   test('Process batch missing request.url', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -910,7 +914,7 @@ describe('Batch', () => {
   });
 
   test('Process batch not found', async () => {
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -950,7 +954,7 @@ describe('Batch', () => {
       name: [{ family: 'Foo', given: ['Bar'] }],
     });
 
-    const bundle = await processBatch(router, repo, {
+    const bundle = await processBatch(router, repo, new InMemoryLocker(), {
       resourceType: 'Bundle',
       type: 'batch',
       entry: [
@@ -968,7 +972,7 @@ describe('Batch', () => {
 
   describe('Process Transactions', () => {
     test('Embedded urn:uuid', async () => {
-      const bundle = await processBatch(router, repo, {
+      const bundle = await processBatch(router, repo, new InMemoryLocker(), {
         resourceType: 'Bundle',
         type: 'transaction',
         entry: [
@@ -1030,7 +1034,7 @@ describe('Batch', () => {
     });
 
     test.skip('Transaction update after create', async () => {
-      const bundle = await processBatch(router, repo, {
+      const bundle = await processBatch(router, repo, new InMemoryLocker(), {
         resourceType: 'Bundle',
         type: 'transaction',
         entry: [
@@ -1076,7 +1080,7 @@ describe('Batch', () => {
     });
 
     test.skip('urn:uuid in PATCH', async () => {
-      const bundle = await processBatch(router, repo, {
+      const bundle = await processBatch(router, repo, new InMemoryLocker(), {
         resourceType: 'Bundle',
         type: 'transaction',
         entry: [
@@ -1180,7 +1184,7 @@ describe('Batch', () => {
       ],
     };
 
-    const result = await processBatch(router, repo, bundle);
+    const result = await processBatch(router, repo, new InMemoryLocker(), bundle);
     expect(result).toBeDefined();
   });
 });

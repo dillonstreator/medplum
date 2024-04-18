@@ -16,6 +16,7 @@ import { Bundle, BundleEntry, BundleEntryRequest, OperationOutcome, Resource, Re
 import { FhirResponse, FhirRouter, createResourceImpl, updateResourceImpl } from './fhirrouter';
 import { FhirRepository } from './repo';
 import { HttpMethod } from './urlrouter';
+import { Locker } from './lock';
 
 /**
  * Processes a FHIR batch request.
@@ -23,15 +24,21 @@ import { HttpMethod } from './urlrouter';
  * See: https://www.hl7.org/fhir/http.html#transaction
  * @param router - The FHIR router.
  * @param repo - The FHIR repository.
+ * @param locker - The locker.
  * @param bundle - The input bundle.
  * @returns The bundle response.
  */
-export async function processBatch(router: FhirRouter, repo: FhirRepository, bundle: Bundle): Promise<Bundle> {
+export async function processBatch(
+  router: FhirRouter,
+  repo: FhirRepository,
+  locker: Locker,
+  bundle: Bundle
+): Promise<Bundle> {
   const bundleType = bundle.type;
   if (bundleType !== 'batch' && bundleType !== 'transaction') {
     throw new OperationOutcomeError(badRequest('Unrecognized bundle type: ' + bundleType));
   }
-  const processor = new BatchProcessor(router, repo, bundle);
+  const processor = new BatchProcessor(router, repo, locker, bundle);
   return bundleType === 'transaction' ? repo.withTransaction(() => processor.processBatch()) : processor.processBatch();
 }
 
@@ -49,11 +56,13 @@ class BatchProcessor {
    * Creates a batch processor.
    * @param router - The FHIR router.
    * @param repo - The FHIR repository.
+   * @param locker - The locker.
    * @param bundle - The input bundle.
    */
   constructor(
     private readonly router: FhirRouter,
     private readonly repo: FhirRepository,
+    private readonly locker: Locker,
     private readonly bundle: Bundle
   ) {
     this.resolvedIdentities = Object.create(null);
@@ -69,22 +78,39 @@ class BatchProcessor {
     let count = 0;
     let errors = 0;
 
-    const entryIndices = await this.preprocessBundle(resultEntries);
-    for (const entryIndex of entryIndices) {
-      const entry = this.bundle.entry?.[entryIndex] as BundleEntry;
-      const rewritten = this.rewriteIdsInObject(entry);
-      try {
-        count++;
-        resultEntries[entryIndex] = await this.processBatchEntry(rewritten);
-      } catch (err) {
-        if (bundleType !== 'transaction') {
-          errors++;
-          resultEntries[entryIndex] = buildBundleResponse(normalizeOperationOutcome(err));
-          continue;
-        }
-        throw err;
+    let maybeWithLock: (fn: () => Promise<void>) => Promise<void> = (fn) => fn();
+    // TODO: project based feature flag?
+    if (bundleType === 'transaction') {
+      // TODO: only acquire lock for bundles containing request.if* conditions?
+      // furthermore, only lock the necessary resourceTypes?
+      const resourceKeys = this.bundle.entry
+        ?.map((e) => e.resource?.resourceType)
+        .filter((rt) => rt)
+        .map((rt) => `${rt}`);
+      const uniqResourceKeys = Array.from(new Set(resourceKeys ?? []));
+      if (uniqResourceKeys?.length) {
+        maybeWithLock = (fn) => this.locker.lock(uniqResourceKeys, fn);
       }
     }
+
+    await maybeWithLock(async () => {
+      const entryIndices = await this.preprocessBundle(resultEntries);
+      for (const entryIndex of entryIndices) {
+        const entry = this.bundle.entry?.[entryIndex] as BundleEntry;
+        const rewritten = this.rewriteIdsInObject(entry);
+        try {
+          count++;
+          resultEntries[entryIndex] = await this.processBatchEntry(rewritten);
+        } catch (err) {
+          if (bundleType !== 'transaction') {
+            errors++;
+            resultEntries[entryIndex] = buildBundleResponse(normalizeOperationOutcome(err));
+            continue;
+          }
+          throw err;
+        }
+      }
+    });
 
     const event: BatchEvent = {
       type: 'batch',

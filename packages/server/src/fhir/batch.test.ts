@@ -401,6 +401,48 @@ describe('Batch and Transaction processing', () => {
     });
   });
 
+  test('Concurrent competing transactions strict uniqueness guarantees', async () => {
+    const id = randomUUID();
+    const idSystem = 'http://example.com/uuid';
+
+    const transaction: Bundle = {
+      resourceType: 'Bundle',
+      type: 'transaction',
+      entry: [
+        {
+          request: {
+            method: 'POST',
+            url: 'Patient',
+            ifNoneExist: `identifier=${idSystem}|${id}`,
+          },
+          resource: {
+            resourceType: 'Patient',
+            identifier: [{ system: idSystem, value: id }],
+          },
+        },
+      ],
+    };
+
+    const results = await Promise.all(
+      new Array(5).fill(undefined).map(() => {
+        return request(app)
+          .post(`/fhir/R4/`)
+          .set('Authorization', 'Bearer ' + accessToken)
+          .set('Content-Type', ContentType.FHIR_JSON)
+          .send(transaction);
+      })
+    );
+    expect(results.every((result) => result.status === 200)).toBe(true);
+
+    const patients = await request(app)
+      .get(`/fhir/R4/Patient?identifier=${idSystem}|${id}`)
+      .set('Authorization', 'Bearer ' + accessToken);
+
+    expect((patients.body as Bundle).entry?.length).toBe(1);
+  });
+
+  // TODO: test locking behavior with multiple mutated resource type in a bundle
+
   test('Create batch wrong content type', async () => {
     const res = await request(app)
       .post(`/fhir/R4/`)

@@ -1,15 +1,22 @@
 import { sleep } from '@medplum/core';
 import Redis from 'ioredis';
 import { MedplumRedisConfig } from './config';
+import Redlock from 'redlock';
 
 let redis: Redis | undefined = undefined;
 let redisSubscribers: Set<Redis> | undefined = undefined;
+let redlock: Redlock | undefined = undefined;
 
 export function initRedis(config: MedplumRedisConfig): void {
   redis = new Redis(config);
+  redlock = new Redlock([redis]);
 }
 
 export async function closeRedis(): Promise<void> {
+  if (redlock) {
+    redlock = undefined;
+  }
+
   if (redis) {
     const tmpRedis = redis;
     const tmpSubscribers = redisSubscribers;
@@ -74,4 +81,11 @@ export function getRedisSubscriber(): Redis & { quit: never } {
  */
 export function getRedisSubscriberCount(): number {
   return redisSubscribers?.size ?? 0;
+}
+
+export function getRedlock(): Redlock {
+  if (!redlock) {
+    throw new Error('Redlock not initialized');
+  }
+  return redlock;
 }

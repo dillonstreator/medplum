@@ -24,6 +24,7 @@ import { randomUUID } from 'crypto';
 import { FhirRequest, FhirRouter } from '../fhirrouter';
 import { MemoryRepository } from '../repo';
 import { getRootSchema, graphqlHandler } from './graphql';
+import { InMemoryLocker } from '../lock';
 
 const repo = new MemoryRepository();
 let binary: Binary;
@@ -105,6 +106,7 @@ describe('GraphQL', () => {
         body: {},
       },
       repo,
+      new InMemoryLocker(),
       fhirRouter
     );
     expect(outcome).toMatchObject(badRequest('Must provide query.'));
@@ -123,6 +125,7 @@ describe('GraphQL', () => {
         },
       },
       repo,
+      new InMemoryLocker(),
       fhirRouter
     );
     expect(outcome).toMatchObject(badRequest('GraphQL syntax error.'));
@@ -148,6 +151,7 @@ describe('GraphQL', () => {
         },
       },
       repo,
+      new InMemoryLocker(),
       fhirRouter
     );
     expect(outcome).toMatchObject(forbidden);
@@ -171,7 +175,7 @@ describe('GraphQL', () => {
       },
     };
     const fhirRouter = new FhirRouter({ introspectionEnabled: true });
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
 
     expect(res[0]).toMatchObject(allOk);
   });
@@ -195,7 +199,7 @@ describe('GraphQL', () => {
       },
     };
     const fhirRouter = new FhirRouter();
-    const result = await graphqlHandler(request, repo, fhirRouter);
+    const result = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(result).toBeDefined();
     expect(result.length).toBe(2);
     expect(result[0]).toMatchObject(allOk);
@@ -225,7 +229,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -254,7 +258,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -279,7 +283,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -305,7 +309,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -331,7 +335,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -358,7 +362,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -389,7 +393,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -434,7 +438,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const result = await graphqlHandler(request, repo, fhirRouter);
+    const result = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(result).toBeDefined();
     expect(result.length).toBe(2);
     expect(result[0]).toMatchObject(allOk);
@@ -479,7 +483,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -512,7 +516,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -544,7 +548,7 @@ describe('GraphQL', () => {
       },
     };
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0].issue?.[0]?.details?.text).toEqual(
       'Field "ObservationList" argument "_reference" of type "Patient_Observation_reference!" is required, but it was not provided.'
     );
@@ -586,7 +590,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res1 = await graphqlHandler(request1, repo, fhirRouter);
+    const res1 = await graphqlHandler(request1, repo, new InMemoryLocker(), fhirRouter);
     expect(res1[0]).toMatchObject(allOk);
 
     // 14 levels of nesting is too much
@@ -634,7 +638,7 @@ describe('GraphQL', () => {
       },
     };
 
-    const res2 = await graphqlHandler(request2, repo, fhirRouter);
+    const res2 = await graphqlHandler(request2, repo, new InMemoryLocker(), fhirRouter);
     expect(res2[0].issue?.[0]?.details?.text).toEqual('Field "id" exceeds max depth (depth=14, max=12)');
 
     // Customer request for patients and children via RelatedPerson links
@@ -684,7 +688,7 @@ describe('GraphQL', () => {
       },
     };
 
-    const res3 = await graphqlHandler(request3, repo, fhirRouter);
+    const res3 = await graphqlHandler(request3, repo, new InMemoryLocker(), fhirRouter);
     expect(res3[0]).toMatchObject(allOk);
   });
 
@@ -727,7 +731,10 @@ describe('GraphQL', () => {
       },
     };
     const fhirRouter = new FhirRouter();
-    const [outcome, result] = (await graphqlHandler(request, repo, fhirRouter)) as [OperationOutcome, any];
+    const [outcome, result] = (await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter)) as [
+      OperationOutcome,
+      any,
+    ];
     expect(outcome).toMatchObject(allOk);
     expect(result.data.StructureDefinitionList).toBeDefined();
     expect(result.data.SearchParameterList).toBeDefined();
@@ -764,7 +771,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -805,7 +812,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -845,7 +852,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -887,7 +894,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -927,7 +934,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -972,7 +979,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -1015,7 +1022,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -1050,7 +1057,7 @@ describe('GraphQL', () => {
     };
 
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -1093,7 +1100,7 @@ describe('GraphQL', () => {
       },
     };
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const data = (res[1] as any).data;
@@ -1120,7 +1127,7 @@ describe('GraphQL', () => {
       },
     };
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res).toMatchObject([
       {
         resourceType: 'OperationOutcome',
@@ -1189,7 +1196,7 @@ describe('GraphQL', () => {
       },
     };
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
 
     const retrievePatient = await repo.readResource<Patient>('Patient', patient.id ?? '');
@@ -1225,7 +1232,7 @@ describe('GraphQL', () => {
       },
     };
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]?.issue?.[0]?.details?.text).toEqual(
       'Field "PatientUpdate" argument "res" of type "PatientCreate!" is required, but it was not provided.'
     );
@@ -1255,7 +1262,7 @@ describe('GraphQL', () => {
       },
     };
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res).toMatchObject([
       {
         resourceType: 'OperationOutcome',
@@ -1307,7 +1314,7 @@ describe('GraphQL', () => {
       },
     };
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res).toMatchObject([
       {
         resourceType: 'OperationOutcome',
@@ -1359,7 +1366,7 @@ describe('GraphQL', () => {
       },
     };
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
     try {
       await repo.readReference(createReference(patient));
@@ -1400,7 +1407,7 @@ describe('GraphQL', () => {
       },
     };
     const fhirRouter = new FhirRouter();
-    const res = await graphqlHandler(request, repo, fhirRouter);
+    const res = await graphqlHandler(request, repo, new InMemoryLocker(), fhirRouter);
     expect(res[0]).toMatchObject(allOk);
     expect((res[1] as any).errors).toBeUndefined();
   });

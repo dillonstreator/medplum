@@ -63,6 +63,7 @@
     "nodemailer": "6.9.13",
     "otplib": "12.0.1",
     "pg": "8.11.5",
+    "redlock": "^5.0.0-beta.2",
     "rfc6902": "5.1.1",
     "ua-parser-js": "1.0.37",
     "uuid": "9.0.1",

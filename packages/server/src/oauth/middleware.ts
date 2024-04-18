@@ -6,6 +6,8 @@ import { AuthenticatedRequestContext, getRequestContext, requestContextStore } f
 import { getRepoForLogin } from '../fhir/accesspolicy';
 import { getSystemRepo } from '../fhir/repo';
 import { getClientApplicationMembership, getLoginForAccessToken, timingSafeEqualStr } from './utils';
+import { RedlockLocker } from '../lock';
+import { getRedlock } from '../redis';
 
 export interface AuthState {
   login: Login;
@@ -20,7 +22,16 @@ export function authenticateRequest(req: Request, res: Response, next: NextFunct
       const ctx = getRequestContext();
       const repo = await getRepoForLogin(login, membership, project, isExtendedMode(req));
       requestContextStore.run(
-        new AuthenticatedRequestContext(ctx, login, project, membership, repo, undefined, accessToken),
+        new AuthenticatedRequestContext(
+          ctx,
+          login,
+          project,
+          membership,
+          repo,
+          new RedlockLocker(getRedlock(), `medplum:lock:${project.id}:`),
+          undefined,
+          accessToken
+        ),
         () => next()
       );
     })

@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { NextFunction, Request, Response } from 'express';
 import { Repository, getSystemRepo } from './fhir/repo';
 import { parseTraceparent } from './traceparent';
+import { Locker } from '@medplum/fhir-router';
 
 export class RequestContext {
   readonly requestId: string;
@@ -32,6 +33,7 @@ const systemLogger = new Logger(write, undefined, LogLevel.ERROR);
 
 export class AuthenticatedRequestContext extends RequestContext {
   readonly repo: Repository;
+  readonly locker: Locker;
   readonly project: Project;
   readonly membership: ProjectMembership;
   readonly login: Login;
@@ -44,12 +46,14 @@ export class AuthenticatedRequestContext extends RequestContext {
     project: Project,
     membership: ProjectMembership,
     repo: Repository,
+    locker: Locker,
     logger?: Logger,
     accessToken?: string
   ) {
     super(ctx.requestId, ctx.traceId, logger);
 
     this.repo = repo;
+    this.locker = locker;
     this.project = project;
     this.membership = membership;
     this.login = login;
@@ -68,6 +72,7 @@ export class AuthenticatedRequestContext extends RequestContext {
       {} as unknown as Project,
       {} as unknown as ProjectMembership,
       getSystemRepo(),
+      {} as unknown as Locker,
       systemLogger
     );
   }
