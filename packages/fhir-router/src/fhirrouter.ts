@@ -159,13 +159,13 @@ export async function updateResourceImpl<T extends Resource>(
 }
 
 // Conditional update
-async function conditionalUpdate(req: FhirRequest, repo: FhirRepository): Promise<FhirResponse> {
+async function conditionalUpdate(req: FhirRequest, repo: FhirRepository, locker: Locker): Promise<FhirResponse> {
   const { resourceType } = req.params;
   const params = req.query;
   const resource = req.body;
 
   const search = parseSearchRequest(resourceType as ResourceType, params);
-  const result = await repo.conditionalUpdate(resource, search);
+  const result = await repo.conditionalUpdate(resource, search, locker);
   return [result.outcome, result.resource];
 }
 

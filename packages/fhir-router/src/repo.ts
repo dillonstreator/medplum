@@ -17,6 +17,7 @@ import {
 } from '@medplum/core';
 import { Bundle, BundleEntry, OperationOutcome, Reference, Resource } from '@medplum/fhirtypes';
 import { Operation, applyPatch } from 'rfc6902';
+import { Locker } from './lock';
 
 export type CreateResourceOptions = {
   assignedId?: boolean;
@@ -204,37 +205,40 @@ export abstract class FhirRepository<TClient = unknown> {
   async conditionalUpdate<T extends Resource>(
     resource: T,
     search: SearchRequest,
+    locker: Locker,
     options?: UpdateResourceOptions
   ): Promise<{ resource: T; outcome: OperationOutcome }> {
     if (search.resourceType !== resource.resourceType) {
       throw new OperationOutcomeError(badRequest('Search type must match resource type for conditional update'));
     }
 
-    return this.withTransaction(async () => {
-      const matches = await this.searchResources(search);
-      if (matches.length === 0) {
-        if (resource.id) {
+    return locker.lock([resource.resourceType], () => {
+      return this.withTransaction(async () => {
+        const matches = await this.searchResources(search);
+        if (matches.length === 0) {
+          if (resource.id) {
+            throw new OperationOutcomeError(
+              badRequest('Cannot perform create as update with client-assigned ID', resource.resourceType + '.id')
+            );
+          }
+          resource = await this.createResource(resource);
+          return { resource, outcome: created };
+        } else if (matches.length > 1) {
+          throw new OperationOutcomeError(multipleMatches);
+        }
+
+        const existing = matches[0];
+        if (resource.id && resource.id !== existing.id) {
           throw new OperationOutcomeError(
-            badRequest('Cannot perform create as update with client-assigned ID', resource.resourceType + '.id')
+            badRequest('Resource ID did not match resolved ID', resource.resourceType + '.id')
           );
         }
-        resource = await this.createResource(resource);
-        return { resource, outcome: created };
-      } else if (matches.length > 1) {
-        throw new OperationOutcomeError(multipleMatches);
-      }
 
-      const existing = matches[0];
-      if (resource.id && resource.id !== existing.id) {
-        throw new OperationOutcomeError(
-          badRequest('Resource ID did not match resolved ID', resource.resourceType + '.id')
-        );
-      }
-
-      resource.id = existing.id;
-      resource = await this.updateResource(resource, options);
-      return { resource, outcome: allOk };
-    });
+        resource.id = existing.id;
+        resource = await this.updateResource(resource, options);
+        return { resource, outcome: allOk };
+      });
+    })
   }
 }
 
