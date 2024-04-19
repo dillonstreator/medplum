@@ -77,7 +77,7 @@ async function searchByPost(req: FhirRequest, repo: FhirRepository): Promise<Fhi
 }
 
 // Create resource
-async function createResource(req: FhirRequest, repo: FhirRepository): Promise<FhirResponse> {
+async function createResource(req: FhirRequest, repo: FhirRepository, locker: Locker): Promise<FhirResponse> {
   const { resourceType } = req.params;
   const resource = req.body as Resource;
 
@@ -88,7 +88,7 @@ async function createResource(req: FhirRequest, repo: FhirRepository): Promise<F
       ifNoneExist = ifNoneExist[0];
     }
 
-    const result = await repo.conditionalCreate(resource, parseSearchRequest(ifNoneExist));
+    const result = await repo.conditionalCreate(resource, parseSearchRequest(ifNoneExist), locker);
     return [result.outcome, result.resource];
   }
 

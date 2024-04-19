@@ -16,7 +16,7 @@ import { Bundle, BundleEntry, BundleEntryRequest, OperationOutcome, Resource, Re
 import { FhirResponse, FhirRouter, createResourceImpl, updateResourceImpl } from './fhirrouter';
 import { FhirRepository } from './repo';
 import { HttpMethod } from './urlrouter';
-import { Locker } from './lock';
+import { Locker, NopLocker } from './lock';
 
 /**
  * Processes a FHIR batch request.
@@ -287,6 +287,11 @@ class BatchProcessor {
           const { outcome, resource } = await this.repo.conditionalCreate(
             entry.resource,
             parseSearchRequest(params.resourceType + '?' + entry.request.ifNoneExist),
+            // TODO: this might be inside of a transaction or batch
+            // if in transaction, resources are already locked so use NopLocker
+            // if in batch, resources are NOT locked so we should use the RedlockLocker
+            // maybe drill from parent?
+            new NopLocker(),
             { assignedId: true }
           );
           return [outcome, resource];

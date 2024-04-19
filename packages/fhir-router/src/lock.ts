@@ -53,3 +53,9 @@ export class InMemoryLocker implements Locker {
     }
   }
 }
+
+export class NopLocker implements Locker {
+  async lock<T>(resources: string[], fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    return fn(new AbortController().signal);
+  }
+}
