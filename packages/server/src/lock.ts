@@ -18,6 +18,7 @@ export class RedlockLocker implements Locker {
       return result;
     } catch (e) {
       if (e instanceof ExecutionError) {
+        // https://github.com/mike-marcacci/node-redlock/blob/51388139356efa700f9dd4616e822eb377a47c95/src/index.ts#L465
         if (e.message.includes('The operation was unable to achieve a quorum during its retry window')) {
           throw new OperationOutcomeError(conflict('unable to acquire lock'));
         } else {

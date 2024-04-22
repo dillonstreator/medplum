@@ -78,16 +78,26 @@ class BatchProcessor {
     let count = 0;
     let errors = 0;
 
+    // TODO: extract to utility function?
+    const isConditionalBundleEntry = (entry: BundleEntry): boolean =>
+      !!(
+        entry.request?.ifMatch ||
+        entry.request?.ifNoneExist ||
+        entry.request?.ifModifiedSince ||
+        entry.request?.ifNoneMatch
+      );
+
     let maybeWithLock: (fn: () => Promise<void>) => Promise<void> = (fn) => fn();
-    // TODO: project based feature flag?
+    // TODO: project based or global feature flag?
     if (bundleType === 'transaction') {
-      // TODO: only acquire lock for bundles containing request.if* conditions?
-      // furthermore, only lock the necessary resourceTypes?
-      const resourceKeys = this.bundle.entry
-        ?.map((e) => e.resource?.resourceType)
-        .filter((rt) => rt)
-        .map((rt) => `${rt}`);
-      const uniqResourceKeys = Array.from(new Set(resourceKeys ?? []));
+      const resourceKeys =
+        this.bundle.entry
+          ?.filter(isConditionalBundleEntry)
+          .map((e) => e.resource?.resourceType)
+          .filter((rt) => rt)
+          .map((rt) => `${rt}`) ?? [];
+      // TODO: maybe move uniqueness to locker
+      const uniqResourceKeys = Array.from(new Set(resourceKeys));
       if (uniqResourceKeys?.length) {
         maybeWithLock = (fn) => this.locker.lock(uniqResourceKeys, fn);
       }
@@ -100,7 +110,10 @@ class BatchProcessor {
         const rewritten = this.rewriteIdsInObject(entry);
         try {
           count++;
-          resultEntries[entryIndex] = await this.processBatchEntry(rewritten);
+          resultEntries[entryIndex] = await this.processBatchEntry(
+            rewritten,
+            bundleType === 'transaction' ? new NopLocker() : this.locker
+          );
         } catch (err) {
           if (bundleType !== 'transaction') {
             errors++;
@@ -251,17 +264,18 @@ class BatchProcessor {
   /**
    * Processes a single entry from a FHIR batch request.
    * @param entry - The bundle entry.
+   * @param locker - The locker.
    * @returns The bundle entry response.
    */
-  private async processBatchEntry(entry: BundleEntry): Promise<BundleEntry> {
-    const [outcome, resource] = await this.performBatchOperation(entry);
+  private async processBatchEntry(entry: BundleEntry, locker: Locker): Promise<BundleEntry> {
+    const [outcome, resource] = await this.performBatchOperation(entry, locker);
     if (!isOk(outcome) && this.bundle.type === 'transaction') {
       throw new OperationOutcomeError(outcome);
     }
     return buildBundleResponse(outcome, resource);
   }
 
-  private async performBatchOperation(entry: BundleEntry): Promise<FhirResponse> {
+  private async performBatchOperation(entry: BundleEntry, locker: Locker): Promise<FhirResponse> {
     const urlParts = splitN(entry.request?.url as string, '?', 2);
     const requestPath = urlParts[0];
     const queryParams = urlParts[1];
@@ -287,11 +301,7 @@ class BatchProcessor {
           const { outcome, resource } = await this.repo.conditionalCreate(
             entry.resource,
             parseSearchRequest(params.resourceType + '?' + entry.request.ifNoneExist),
-            // TODO: this might be inside of a transaction or batch
-            // if in transaction, resources are already locked so use NopLocker
-            // if in batch, resources are NOT locked so we should use the RedlockLocker
-            // maybe drill from parent?
-            new NopLocker(),
+            locker,
             { assignedId: true }
           );
           return [outcome, resource];
@@ -307,7 +317,8 @@ class BatchProcessor {
         if (queryParams) {
           const { outcome, resource } = await this.repo.conditionalUpdate(
             entry.resource,
-            parseSearchRequest(entry.resource.resourceType + '?' + queryParams)
+            parseSearchRequest(entry.resource.resourceType + '?' + queryParams),
+            locker
           );
           return [outcome, resource];
         }
