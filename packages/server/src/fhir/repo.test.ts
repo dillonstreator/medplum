@@ -34,6 +34,7 @@ import { getDatabasePool } from '../database';
 import { bundleContains, createTestProject, withTestContext } from '../test.setup';
 import { getRepoForLogin } from './accesspolicy';
 import { getSystemRepo, Repository } from './repo';
+import { InMemoryLocker } from '@medplum/fhir-router';
 
 jest.mock('hibp');
 
@@ -993,7 +994,7 @@ describe('FHIR Repo', () => {
         systemRepo.conditionalUpdate(patient, {
           resourceType: 'Observation',
           filters: [{ code: 'identifier', operator: Operator.EQUALS, value: 'http://example.com/mrn|' + mrn }],
-        })
+        }, new InMemoryLocker())
       ).rejects.toThrow('Search type must match resource type for conditional update');
 
       // Invalid create with preassigned ID
@@ -1003,7 +1004,7 @@ describe('FHIR Repo', () => {
           {
             resourceType: 'Patient',
             filters: [{ code: 'identifier', operator: Operator.EQUALS, value: 'http://example.com/mrn|' + mrn }],
-          }
+          }, new InMemoryLocker()
         )
       ).rejects.toThrow('Cannot perform create as update with client-assigned ID (Patient.id)');
 
@@ -1011,7 +1012,7 @@ describe('FHIR Repo', () => {
       const create = await systemRepo.conditionalUpdate(patient, {
         resourceType: 'Patient',
         filters: [{ code: 'identifier', operator: Operator.EQUALS, value: 'http://example.com/mrn|' + mrn }],
-      });
+      }, new InMemoryLocker());
       expect(create.resource.id).toBeDefined();
       const existing = create.resource;
       expect(create.outcome.id).toEqual(created.id);
@@ -1021,7 +1022,7 @@ describe('FHIR Repo', () => {
       const update = await systemRepo.conditionalUpdate(patient, {
         resourceType: 'Patient',
         filters: [{ code: 'identifier', operator: Operator.EQUALS, value: 'http://example.com/mrn|' + mrn }],
-      });
+      }, new InMemoryLocker());
       expect(update.resource.id).toEqual(existing.id);
       expect(update.resource.gender).toEqual('unknown');
       expect(update.outcome.id).toEqual(allOk.id);
@@ -1032,7 +1033,7 @@ describe('FHIR Repo', () => {
         systemRepo.conditionalUpdate(patient, {
           resourceType: 'Patient',
           filters: [{ code: 'identifier', operator: Operator.EQUALS, value: 'http://example.com/mrn|' + mrn }],
-        })
+        }, new InMemoryLocker())
       ).rejects.toThrow('Resource ID did not match resolved ID (Patient.id)');
 
       // Create duplicate resource
@@ -1044,7 +1045,7 @@ describe('FHIR Repo', () => {
         systemRepo.conditionalUpdate(patient, {
           resourceType: 'Patient',
           filters: [{ code: 'identifier', operator: Operator.EQUALS, value: 'http://example.com/mrn|' + mrn }],
-        })
+        }, new InMemoryLocker())
       ).rejects.toThrow('Multiple resources found matching condition');
     }));
 
